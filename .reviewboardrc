@@ -1,1 +1,2 @@
 REPOSITORY = "sonic-swss"
+REVIEWBOARD_URL = "https://rb.corp.linkedin.com"
