@@ -6,6 +6,22 @@
 #include "ipprefix.h"
 #include "converter.h"
 
+/*
+ * FIXME: -DESIGN DEFECT
+ * As of today (8/12/2017), the design for ACL is that we use external entity
+ * swssconfig to load the ACL configurations to APP-DB,  the code here in the
+ * orchagent will pickup the changes and sync to ASIC-DB. Some validations were done
+ * at this stage, however, even if the validation failed, we have no way or at least
+ * it was not the orchagent's resposibility to deal with upstream APP-DB, this will
+ * leave inconsistency states in the DBs. e,g, between APP-DB and ASIC-DB/HW.
+ * Hopefull with the configDB design, we should moved the validation logic to configMgmt
+ * before the configDB, configMgmt will decide to inject the entries to DB or not.
+ * Also, if we have to have some validation logic downstream, the configDB design
+ * should have provided the feedback system to set config entry with pending/active flag,
+ * and if downstream does not qualify the config, configMgmt should roll back the config.
+ * There are more issues to be describled later in the code as well.
+ */
+
 using namespace std;
 using namespace swss;
 
@@ -25,10 +41,21 @@ extern sai_switch_api_t* sai_switch_api;
 extern sai_object_id_t   gSwitchId;
 extern PortsOrch*        gPortsOrch;
 
+/* For displaying the type */
+const char *AclTableTypeString[] =
+{
+    "ACL_TABLE_UNKNOWN",
+    "ACL_TABLE_L3",
+    "ACL_TABLE_L3V6",
+    "ACL_TABLE_MIRROR"
+};
+
 acl_rule_attr_lookup_t aclMatchLookup =
 {
     { MATCH_SRC_IP,            SAI_ACL_ENTRY_ATTR_FIELD_SRC_IP },
     { MATCH_DST_IP,            SAI_ACL_ENTRY_ATTR_FIELD_DST_IP },
+    { MATCH_SRC_IPV6,          SAI_ACL_ENTRY_ATTR_FIELD_SRC_IPV6 },
+    { MATCH_DST_IPV6,          SAI_ACL_ENTRY_ATTR_FIELD_DST_IPV6 },
     { MATCH_L4_SRC_PORT,       SAI_ACL_ENTRY_ATTR_FIELD_L4_SRC_PORT },
     { MATCH_L4_DST_PORT,       SAI_ACL_ENTRY_ATTR_FIELD_L4_DST_PORT },
     { MATCH_ETHER_TYPE,        SAI_ACL_ENTRY_ATTR_FIELD_ETHER_TYPE },
@@ -51,6 +78,7 @@ acl_rule_attr_lookup_t aclL3ActionLookup =
 static acl_table_type_lookup_t aclTableTypeLookUp =
 {
     { TABLE_TYPE_L3,     ACL_TABLE_L3 },
+    { TABLE_TYPE_L3V6,   ACL_TABLE_L3V6 },
     { TABLE_TYPE_MIRROR, ACL_TABLE_MIRROR }
 };
 
@@ -199,22 +227,33 @@ bool AclRule::validateAddMatch(string attr_name, string attr_value)
         {
             IpPrefix ip(attr_value);
 
+            if (!ip.isV4())
+            {
+                SWSS_LOG_ERROR("IP type is not v4 type");
+                return false;
+            }
+            value.aclfield.data.ip4 = ip.getIp().getV4Addr();
+            value.aclfield.mask.ip4 = ip.getMask().getV4Addr();
+        }
+        else if (attr_name == MATCH_SRC_IPV6 || attr_name == MATCH_DST_IPV6)
+        {
+            IpPrefix ip(attr_value);
             if (ip.isV4())
             {
-                value.aclfield.data.ip4 = ip.getIp().getV4Addr();
-                value.aclfield.mask.ip4 = ip.getMask().getV4Addr();
+                SWSS_LOG_ERROR("IP type is not v6 type");
+                return false;
             }
-            else
-            {
-                memcpy(value.aclfield.data.ip6, ip.getIp().getV6Addr(), 16);
-                memcpy(value.aclfield.mask.ip6, ip.getMask().getV6Addr(), 16);
-            }
+            memcpy(value.aclfield.data.ip6, ip.getIp().getV6Addr(), 16);
+            memcpy(value.aclfield.mask.ip6, ip.getMask().getV6Addr(), 16);
         }
-        else if ((attr_name == MATCH_L4_SRC_PORT_RANGE) || (attr_name == MATCH_L4_DST_PORT_RANGE))
+        else if ((attr_name == MATCH_L4_SRC_PORT_RANGE)
+	    || (attr_name == MATCH_L4_DST_PORT_RANGE))
         {
-            if (sscanf(attr_value.c_str(), "%d-%d", &value.u32range.min, &value.u32range.max) != 2)
+            if (sscanf(attr_value.c_str(), "%d-%d", &value.u32range.min,
+	        &value.u32range.max) != 2)
             {
-                SWSS_LOG_ERROR("Range parse error. Attribute: %s, value: %s", attr_name.c_str(), attr_value.c_str());
+                SWSS_LOG_ERROR("Range parse error. Attribute: %s, value: %s",
+		    attr_name.c_str(), attr_value.c_str());
                 return false;
             }
 
@@ -452,7 +491,7 @@ shared_ptr<AclRule> AclRule::makeShared(acl_table_type_t type, AclOrch *acl, Mir
         throw runtime_error("ACL rule action is not found in rule " + rule);
     }
 
-    if (type != ACL_TABLE_L3 && type != ACL_TABLE_MIRROR)
+    if (type != ACL_TABLE_L3 && type != ACL_TABLE_L3V6 && type != ACL_TABLE_MIRROR)
     {
         throw runtime_error("Unknown table type.");
     }
@@ -462,8 +501,8 @@ shared_ptr<AclRule> AclRule::makeShared(acl_table_type_t type, AclOrch *acl, Mir
     {
         return make_shared<AclRuleMirror>(acl, mirror, rule, table, type);
     }
-    /* L3 rules can exist only in L3 table */
-    else if (type == ACL_TABLE_L3)
+    /* L3/L3V6 rules can exist only in L3/L3V6 table (ipv4 or ipv6) */
+    else if (type == ACL_TABLE_L3 || type == ACL_TABLE_L3V6)
     {
         return make_shared<AclRuleL3>(acl, rule, table, type);
     }
@@ -727,7 +766,8 @@ bool AclRuleMirror::validateAddAction(string attr_name, string attr_value)
 
 bool AclRuleMirror::validateAddMatch(string attr_name, string attr_value)
 {
-    if (m_tableType == ACL_TABLE_L3 && attr_name == MATCH_DSCP)
+    if ((m_tableType == ACL_TABLE_L3 || m_tableType == ACL_TABLE_L3)
+	&& attr_name == MATCH_DSCP)
     {
         SWSS_LOG_ERROR("DSCP match is not supported for the tables of type L3");
         return false;
@@ -1073,10 +1113,74 @@ bool AclOrch::addAclTable(AclTable &newTable, string table_id)
 
     if (table_oid != SAI_NULL_OBJECT_ID)
     {
-        /* If ACL table exists, remove the table first.*/
-        if (!removeAclTable(table_id))
+
+        /*
+         * There are a few cases when the table exists:
+         * If we see there is no rules in the table, we can
+         * delete and create to keep the consitency.
+         * In case the table has associated rules, we could :
+         * 1, delete the ACL table and add it back (old code use this)
+         * 2: delete all associated rules of the table, then delete and
+         *     create the new ACL table
+         * 3, don't touch the ASIC-DB/HW and report error
+         * option 1 will fail due the resource sharing and will create low
+         * level inconsistency.
+         * option 2 will create inconsitency of the rules between APP-DB
+         * and ASIS-DB.
+         * option 3 will create inconsitency of the ACL able between APP-DB
+         * and ASIC-DB/HW.
+         * Here we just use option 3. And print the error message with the
+         * details for user to restore it manually by inject the old ACL table.
+         * The ultimate fix should be the design change as mentioned at beginning
+         */
+        if (m_AclTables[table_oid].rules.empty())
         {
-            SWSS_LOG_ERROR("Fail to remove the exsiting ACL table %s when try to add the new one.", table_id.c_str());
+            if (deleteUnbindAclTable(table_oid) == SAI_STATUS_SUCCESS)
+            {
+                SWSS_LOG_INFO("Successfully deleted ACL table %s", table_id.c_str());
+                m_AclTables.erase(table_oid);
+            }
+            else
+            {
+                /* fail to delete, log it and print error */
+                SWSS_LOG_ERROR("Failed to delete ACL table: %s.",
+                  table_id.c_str());
+                return false;
+            }
+        }
+        else
+        {
+            if (m_AclTables[table_oid].id == newTable.id &&
+              m_AclTables[table_oid].description == newTable.description &&
+              m_AclTables[table_oid].type == newTable.type &&
+              m_AclTables[table_oid].ports == newTable.ports)
+            {
+                SWSS_LOG_NOTICE("Table added has the same info before: %s",
+                  table_id.c_str());
+            }
+            else
+            {
+                /* get the alias names of the portlist*/
+                Port port;
+                ports_list_t portlist = m_AclTables[table_oid].ports;
+                string portname_str;
+                for (auto port_it = portlist.begin(); port_it != portlist.end();
+                     port_it++)
+                {
+                    m_portOrch->getPort(*port_it, port);
+                    portname_str += port.m_alias + ",";
+                }
+
+                /* ignore the changes, log details for retoring */
+                SWSS_LOG_ERROR("ACL table was not inserted because "
+                  "the same key exists with rules,"
+                  " please restore with this inforamtion: table_id: %s, "
+                  "desciption: %s, type: %s, ports: %s. ",
+                  m_AclTables[table_oid].id.c_str(),
+                  m_AclTables[table_oid].description.c_str(),
+                  AclTableTypeString[m_AclTables[table_oid].type],
+                  portname_str.c_str());
+            }
             return false;
         }
     }
@@ -1103,15 +1207,11 @@ bool AclOrch::removeAclTable(string table_id)
         return true;
     }
 
-    /* If ACL rules associate with this table, remove the rules first.*/
-    while (!m_AclTables[table_oid].rules.empty())
+    /* If ACL rules associate with this table, dont't delete it */
+    if (!m_AclTables[table_oid].rules.empty())
     {
-        auto ruleIter = m_AclTables[table_oid].rules.begin();
-        if (!removeAclRule(table_id, ruleIter->first))
-        {
-            SWSS_LOG_ERROR("Failed to delete existing ACL rule %s when removing the ACL table %s", ruleIter->first.c_str(), table_id.c_str());
-            return false;
-        }
+        SWSS_LOG_ERROR("Failed to remove the ACL table %s", table_id.c_str());
+        return false;
     }
 
     if (deleteUnbindAclTable(table_oid) == SAI_STATUS_SUCCESS)
@@ -1191,6 +1291,13 @@ bool AclOrch::removeAclRule(string table_id, string rule_id)
     }
 }
 
+/*
+ * FIXME:
+ * Many of the error pathes in this function were not handled other than logging for now
+ * This basically will lead to inconsitent state in APP-DB and ASIC-DB.
+ * Ultimate fix was describled in the beginning of the file
+ */
+
 void AclOrch::doAclTableTask(Consumer &consumer)
 {
     SWSS_LOG_ENTER();
@@ -1228,14 +1335,20 @@ void AclOrch::doAclTableTask(Consumer &consumer)
                 {
                     if (!processAclTableType(attr_value, newTable.type))
                     {
-                        SWSS_LOG_ERROR("Failed to process table type for table %s", table_id.c_str());
+                        SWSS_LOG_ERROR("Failed to process table type for table %s",
+                                     table_id.c_str());
+                        bAllAttributesOk = false;
+                        break;
                     }
                 }
                 else if (attr_name == TABLE_PORTS)
                 {
                     if (!processPorts(attr_value, newTable.ports))
                     {
-                        SWSS_LOG_ERROR("Failed to process table ports for table %s", table_id.c_str());
+                        SWSS_LOG_ERROR("Failed to process table ports for table %s",
+                          table_id.c_str());
+                        bAllAttributesOk = false;
+                        break;
                     }
                 }
                 else
@@ -1305,35 +1418,32 @@ void AclOrch::doAclRuleTask(Consumer &consumer)
                 continue;
             }
 
-            if (bAllAttributesOk)
+            newRule = AclRule::makeShared(m_AclTables[table_oid].type, this, m_mirrorOrch, rule_id, table_id, t);
+
+            for (const auto& itr : kfvFieldsValues(t))
             {
-                newRule = AclRule::makeShared(m_AclTables[table_oid].type, this, m_mirrorOrch, rule_id, table_id, t);
+                string attr_name = toUpper(fvField(itr));
+                string attr_value = fvValue(itr);
 
-                for (const auto& itr : kfvFieldsValues(t))
+                SWSS_LOG_INFO("ATTRIBUTE: %s %s", attr_name.c_str(), attr_value.c_str());
+
+                if (newRule->validateAddPriority(attr_name, attr_value))
                 {
-                    string attr_name = toUpper(fvField(itr));
-                    string attr_value = fvValue(itr);
-
-                    SWSS_LOG_INFO("ATTRIBUTE: %s %s", attr_name.c_str(), attr_value.c_str());
-
-                    if (newRule->validateAddPriority(attr_name, attr_value))
-                    {
-                        SWSS_LOG_INFO("Added priority attribute");
-                    }
-                    else if (newRule->validateAddMatch(attr_name, attr_value))
-                    {
-                        SWSS_LOG_INFO("Added match attribute '%s'", attr_name.c_str());
-                    }
-                    else if (newRule->validateAddAction(attr_name, attr_value))
-                    {
-                        SWSS_LOG_INFO("Added action attribute '%s'", attr_name.c_str());
-                    }
-                    else
-                    {
-                        SWSS_LOG_ERROR("Unknown or invalid rule attribute '%s : %s'", attr_name.c_str(), attr_value.c_str());
-                        bAllAttributesOk = false;
-                        break;
-                    }
+                    SWSS_LOG_INFO("Added priority attribute");
+                }
+                else if (newRule->validateAddMatch(attr_name, attr_value))
+                {
+                    SWSS_LOG_INFO("Added match attribute '%s'", attr_name.c_str());
+                }
+                else if (newRule->validateAddAction(attr_name, attr_value))
+                {
+                    SWSS_LOG_INFO("Added action attribute '%s'", attr_name.c_str());
+                }
+                else
+                {
+                    SWSS_LOG_ERROR("Unknown or invalid rule attribute '%s : %s'", attr_name.c_str(), attr_value.c_str());
+                    bAllAttributesOk = false;
+                    break;
                 }
             }
 
@@ -1468,11 +1578,13 @@ sai_status_t AclOrch::createBindAclTable(AclTable &aclTable, sai_object_id_t &ta
 
     attr.id = SAI_ACL_TABLE_ATTR_ACL_BIND_POINT_TYPE_LIST;
     vector<int32_t> bpoint_list;
+    /* TODO: Use the binding type */
     bpoint_list.push_back(SAI_ACL_BIND_POINT_TYPE_PORT);
     attr.value.s32list.count = 1;
     attr.value.s32list.list = bpoint_list.data();
     table_attrs.push_back(attr);
 
+    /* TODO: Use the stage field */
     attr.id = SAI_ACL_TABLE_ATTR_ACL_STAGE;
     attr.value.s32 = SAI_ACL_STAGE_INGRESS;
     table_attrs.push_back(attr);
@@ -1489,13 +1601,27 @@ sai_status_t AclOrch::createBindAclTable(AclTable &aclTable, sai_object_id_t &ta
     attr.value.booldata = true;
     table_attrs.push_back(attr);
 
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IP;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
+    if (aclTable.type == ACL_TABLE_L3V6) {
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
 
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IP;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IPV6;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+        SWSS_LOG_INFO("using ipv6 table fields");
+    }
+    else
+    {
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IP;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IP;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+        SWSS_LOG_INFO("using ipv4 table fields");
+    }
 
     attr.id = SAI_ACL_TABLE_ATTR_FIELD_L4_SRC_PORT;
     attr.value.booldata = true;
@@ -1595,6 +1721,12 @@ void AclOrch::collectCountersThread(AclOrch* pAclOrch)
 
 }
 
+/*
+ * FIXME:
+ * port class bindAclTable was supposed to add port to ACL group, not
+ * necessarily manage the ACL group and ACL table.
+ * The code should be refactored.
+ */
 sai_status_t AclOrch::bindAclTable(sai_object_id_t table_oid, AclTable &aclTable, bool bind)
 {
     SWSS_LOG_ENTER();
@@ -1634,16 +1766,24 @@ sai_status_t AclOrch::bindAclTable(sai_object_id_t table_oid, AclTable &aclTable
     }
     else
     {
+	/*
+	 * FIXME: If all acl-table removed, ACL group table should be removed
+	 * This require code refactor. I,E, we should call port.unbingAcltable
+	 * to do the right thing
+	 * See comments at begining of port.cpp
+	 */
         auto range = m_AclTableGroupMembers.equal_range(table_oid);
-        for (auto iter = range.first; iter != range.second; iter++)
+        auto iter = range.first;
+        while (iter != range.second)
         {
             sai_object_id_t member = iter->second;
             status = sai_acl_api->remove_acl_table_group_member(member);
             if (status != SAI_STATUS_SUCCESS) {
-                SWSS_LOG_ERROR("Failed to unbind table %lu as member %lu from ACL table: %d",
-                        table_oid, member, status);
+                SWSS_LOG_ERROR("Failed to unbind table %lu as member %lu from"
+                  "ACL table: %d", table_oid, member, status);
                 return status;
             }
+            m_AclTableGroupMembers.erase(iter++);
         }
     }
 

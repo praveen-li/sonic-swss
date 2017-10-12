@@ -14,7 +14,18 @@ extern sai_acl_api_t* sai_acl_api;
 extern sai_object_id_t gSwitchId;
 
 namespace swss {
-
+/*
+ * FIXME:
+ * There are severe problems with below code that we should fix:
+ * In the functions below, only ACL groups create function and ACL group members
+ * add functions are prodived, there is no code to remove the ACL group or ACL group members.
+ * Suggestion:
+ * - Create a symmetrical "unBinAclTable" function here to remove the port from binding
+ * (acl group member, and if acl table is the last one, remove the group as well).
+ * Where the ACL group and ACL table management code should be discussed, especially if
+ * we are going to support vlan binding feature. It is probably better to manage it outside
+ * and use port bitmap/vlan bitmap to make port/vlan to be part of the table.
+ */
 sai_status_t Port::bindAclTable(sai_object_id_t& group_member_oid, sai_object_id_t table_oid)
 {
     sai_status_t status;

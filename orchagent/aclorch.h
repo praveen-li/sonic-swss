@@ -16,18 +16,25 @@
 // ACL counters update interval in the DB
 // Value is in seconds. Should not be less than 5 seconds
 // (in worst case update of 1265 counters takes almost 5 sec)
-#define COUNTERS_READ_INTERVAL 10
+/*
+ * In our case, we won't have that many counters
+ * and 5 sec is better for displaying
+ */
+#define COUNTERS_READ_INTERVAL 5
 
 #define TABLE_DESCRIPTION "POLICY_DESC"
 #define TABLE_TYPE        "TYPE"
 #define TABLE_PORTS       "PORTS"
 
 #define TABLE_TYPE_L3     "L3"
+#define TABLE_TYPE_L3V6   "L3V6"
 #define TABLE_TYPE_MIRROR "MIRROR"
 
 #define RULE_PRIORITY           "PRIORITY"
 #define MATCH_SRC_IP            "SRC_IP"
 #define MATCH_DST_IP            "DST_IP"
+#define MATCH_SRC_IPV6          "SRC_IPV6"
+#define MATCH_DST_IPV6          "DST_IPV6"
 #define MATCH_L4_SRC_PORT       "L4_SRC_PORT"
 #define MATCH_L4_DST_PORT       "L4_DST_PORT"
 #define MATCH_ETHER_TYPE        "ETHER_TYPE"
@@ -64,6 +71,7 @@ typedef enum
 {
     ACL_TABLE_UNKNOWN,
     ACL_TABLE_L3,
+    ACL_TABLE_L3V6,
     ACL_TABLE_MIRROR
 } acl_table_type_t;
 
