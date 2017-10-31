@@ -5,8 +5,9 @@ CFLAGS_SAI = -I /usr/include/sai
 swssdir = $(datadir)/swss
 
 dist_swss_DATA = \
-		 duration_criteria.lua  \
-		 pfc_restore_check.lua
+		 pfc_detect_mellanox.lua  \
+		 pfc_detect_broadcom.lua \
+		 pfc_restore.lua
 
 bin_PROGRAMS = orchagent routeresync
 
@@ -20,6 +21,7 @@ orchagent_SOURCES = \
 		    main.cpp \
 		    port.cpp \
 		    orchdaemon.cpp \
+		    orchbase.cpp \
 		    orch.cpp \
 		    notifications.cpp \
 		    routeorch.cpp \
@@ -46,6 +48,7 @@ orchagent_SOURCES = \
 		    neighorch.h \
 		    notifications.h \
 		    observer.h \
+		    orchbase.h \
 		    orch.h \
 		    orchdaemon.h \
 		    pfcactionhandler.h \

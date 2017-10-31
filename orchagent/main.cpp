@@ -34,7 +34,6 @@ sai_object_id_t gUnderlayIfId;
 sai_object_id_t gSwitchId = SAI_NULL_OBJECT_ID;
 MacAddress gMacAddress;
 
-#define DEFAULT_BATCH_SIZE  128
 int gBatchSize = DEFAULT_BATCH_SIZE;
 
 bool gSairedisRecord = true;
@@ -247,7 +246,9 @@ int main(int argc, char **argv)
 
     /* Initialize orchestration components */
     DBConnector *appl_db = new DBConnector(APPL_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
-    OrchDaemon *orchDaemon = new OrchDaemon(appl_db);
+    DBConnector *config_db = new DBConnector(CONFIG_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
+
+    OrchDaemon *orchDaemon = new OrchDaemon(appl_db, config_db);
     if (!orchDaemon->init())
     {
         SWSS_LOG_ERROR("Failed to initialize orchstration daemon");
