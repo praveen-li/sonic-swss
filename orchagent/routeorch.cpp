@@ -161,8 +161,7 @@ void RouteOrch::detach(Observer *observer, const IpAddress& dstAddr)
     }
 }
 
-bool
-RouteOrch::validnexthopinNextHopGroup (const IpAddress &ipaddr)
+bool RouteOrch::validnexthopinNextHopGroup(const IpAddress &ipaddr)
 {
     SWSS_LOG_ENTER();
 
@@ -202,8 +201,7 @@ RouteOrch::validnexthopinNextHopGroup (const IpAddress &ipaddr)
     return (true);
 }
 
-bool
-RouteOrch::invalidnexthopinNextHopGroup (const IpAddress &ipaddr)
+bool RouteOrch::invalidnexthopinNextHopGroup(const IpAddress &ipaddr)
 {
     SWSS_LOG_ENTER();
 
@@ -509,8 +507,9 @@ bool RouteOrch::addNextHopGroup(IpAddresses ipAddresses)
             return false;
         }
 
-        sai_object_id_t next_hop_id = m_neighOrch->getNextHopId(it);
+        next_hop_id = m_neighOrch->getNextHopId(it);
         next_hop_ids.push_back(next_hop_id);
+        nhopgroup_members_set[next_hop_id] = it;
     }
 
     sai_attribute_t nhg_attr;
@@ -604,20 +603,23 @@ bool RouteOrch::removeNextHopGroup(IpAddresses ipAddresses)
 {
     SWSS_LOG_ENTER();
 
-    assert(hasNextHopGroup(ipAddresses));
+    sai_object_id_t next_hop_group_id;
+    auto next_hop_group_entry = m_syncdNextHopGroups.find(ipAddresses);
+    sai_status_t status;
 
-    if (m_syncdNextHopGroups[ipAddresses].ref_count != 0) {
+    assert(next_hop_group_entry != m_syncdNextHopGroups.end());
+
+    if (next_hop_group_entry->second.ref_count != 0) {
         return (true);
     }
 
-    sai_status_t status;
-    auto next_hop_group_entry = m_syncdNextHopGroups[ipAddresses];
-    sai_object_id_t next_hop_group_id = next_hop_group_entry.next_hop_group_id;
+    next_hop_group_id = next_hop_group_entry->second.next_hop_group_id;
 
-    for (auto nhop = next_hop_group_entry.nhopgroup_members.begin();
-         nhop != next_hop_group_entry.nhopgroup_members.end(); ++nhop) {
+    for (auto nhop = next_hop_group_entry->second.nhopgroup_members.begin();
+         nhop != next_hop_group_entry->second.nhopgroup_members.end();) {
 
         if (m_neighOrch->isNextHopFlagSet(nhop->first, NHFLAGS_IFDOWN)) {
+            nhop = next_hop_group_entry->second.nhopgroup_members.erase(nhop);
             continue;
         }
         status = sai_next_hop_group_api->remove_next_hop_group_member(nhop->second);
@@ -626,6 +628,7 @@ bool RouteOrch::removeNextHopGroup(IpAddresses ipAddresses)
                            nhop->second, status);
             return (false);
         }
+        nhop = next_hop_group_entry->second.nhopgroup_members.erase(nhop);
     }
 
     status = sai_next_hop_group_api->remove_next_hop_group(next_hop_group_id);

@@ -8,7 +8,7 @@ extern sai_neighbor_api_t*         sai_neighbor_api;
 extern sai_next_hop_api_t*         sai_next_hop_api;
 
 extern PortsOrch *gPortsOrch;
-extern RouteOrch *route_orch;
+extern RouteOrch *gRouteOrch;
 extern sai_object_id_t gSwitchId;
 
 NeighOrch::NeighOrch(DBConnector *db, string tableName, IntfsOrch *intfsOrch) :
@@ -68,24 +68,24 @@ bool NeighOrch::addNextHop(IpAddress ipAddress, string alias)
     return true;
 }
 
-bool
-NeighOrch::setNextHopFlag (const IpAddress &ipaddr, const uint32_t nh_flag)
+bool NeighOrch::setNextHopFlag(const IpAddress &ipaddr, const uint32_t nh_flag)
 {
     SWSS_LOG_ENTER();
 
+    auto nhop = m_syncdNextHops.find(ipaddr);
     bool rc = false;
 
-    assert(hasNextHop(ipaddr));
+    assert(nhop != m_syncdNextHops.end());
 
-    if (m_syncdNextHops[ipaddr].nh_flags & nh_flag) {
+    if (nhop->second.nh_flags & nh_flag) {
         return (true);
     }
 
-    m_syncdNextHops[ipaddr].nh_flags |= nh_flag;
+    nhop->second.nh_flags |= nh_flag;
 
     switch (nh_flag) {
         case NHFLAGS_IFDOWN:
-            rc = route_orch->invalidnexthopinNextHopGroup(ipaddr);
+            rc = gRouteOrch->invalidnexthopinNextHopGroup(ipaddr);
             break;
         default:
             assert(0);
@@ -95,24 +95,24 @@ NeighOrch::setNextHopFlag (const IpAddress &ipaddr, const uint32_t nh_flag)
     return (rc);
 }
 
-bool
-NeighOrch::clearNextHopFlag (const IpAddress &ipaddr, const uint32_t nh_flag)
+bool NeighOrch::clearNextHopFlag(const IpAddress &ipaddr, const uint32_t nh_flag)
 {
     SWSS_LOG_ENTER();
 
+    auto nhop = m_syncdNextHops.find(ipaddr);
     bool rc = false;
 
-    assert(hasNextHop(ipaddr));
+    assert(nhop != m_syncdNextHops.end());
 
-    if (!(m_syncdNextHops[ipaddr].nh_flags & nh_flag)) {
+    if (!(nhop->second.nh_flags & nh_flag)) {
         return (true);
     }
 
-    m_syncdNextHops[ipaddr].nh_flags &= ~nh_flag;
+    nhop->second.nh_flags &= ~nh_flag;
 
     switch (nh_flag) {
         case NHFLAGS_IFDOWN:
-            rc = route_orch->validnexthopinNextHopGroup(ipaddr);
+            rc = gRouteOrch->validnexthopinNextHopGroup(ipaddr);
             break;
         default:
             assert(0);
@@ -122,21 +122,22 @@ NeighOrch::clearNextHopFlag (const IpAddress &ipaddr, const uint32_t nh_flag)
     return (rc);
 }
 
-bool
-NeighOrch::isNextHopFlagSet (const IpAddress &ipaddr, const uint32_t nh_flag)
+bool NeighOrch::isNextHopFlagSet(const IpAddress &ipaddr, const uint32_t nh_flag)
 {
     SWSS_LOG_ENTER();
 
-    assert(hasNextHop(ipaddr));
-    if (m_syncdNextHops[ipaddr].nh_flags & nh_flag) {
+    auto nhop = m_syncdNextHops.find(ipaddr);
+
+    assert(nhop != m_syncdNextHops.end());
+
+    if (nhop->second.nh_flags & nh_flag) {
         return (true);
     }
 
     return (false);
 }
 
-bool
-NeighOrch::ifChangeInformNextHop (const string &alias, bool if_up)
+bool NeighOrch::ifChangeInformNextHop(const string &alias, bool if_up)
 {
     SWSS_LOG_ENTER();
 

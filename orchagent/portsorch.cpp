@@ -24,7 +24,7 @@ extern sai_lag_api_t *sai_lag_api;
 extern sai_hostif_api_t* sai_hostif_api;
 extern sai_acl_api_t* sai_acl_api;
 extern sai_object_id_t gSwitchId;
-extern NeighOrch *neigh_orch;
+extern NeighOrch *gNeighOrch;
 
 #define VLAN_PREFIX         "Vlan"
 #define DEFAULT_VLAN_ID     1
@@ -454,7 +454,7 @@ bool PortsOrch::setHostIntfsOperStatus(sai_object_id_t port_id, bool up)
         }
         SWSS_LOG_NOTICE("Set operation status %s to host interface %s",
                         up ? "UP" : "DOWN", it->second.m_alias.c_str());
-        if (neigh_orch->ifChangeInformNextHop(it->second.m_alias, up) == false) {
+        if (gNeighOrch->ifChangeInformNextHop(it->second.m_alias, up) == false) {
             SWSS_LOG_WARN("Inform nexthop operation failed for interface %s",
                           it->second.m_alias.c_str());
         }
