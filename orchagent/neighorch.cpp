@@ -140,6 +140,7 @@ bool NeighOrch::isNextHopFlagSet(const IpAddress &ipaddr, const uint32_t nh_flag
 bool NeighOrch::ifChangeInformNextHop(const string &alias, bool if_up)
 {
     SWSS_LOG_ENTER();
+    bool rc = true;
 
     for (auto nhop = m_syncdNextHops.begin(); nhop != m_syncdNextHops.end(); ++nhop) {
         if (nhop->second.if_alias != alias) {
@@ -147,13 +148,19 @@ bool NeighOrch::ifChangeInformNextHop(const string &alias, bool if_up)
         }
 
         if (if_up) {
-            return (clearNextHopFlag(nhop->first, NHFLAGS_IFDOWN));
+            rc = clearNextHopFlag(nhop->first, NHFLAGS_IFDOWN);
         } else {
-            return (setNextHopFlag(nhop->first, NHFLAGS_IFDOWN));
+            rc = setNextHopFlag(nhop->first, NHFLAGS_IFDOWN);
+        }
+
+        if (rc == true) {
+            continue;
+        } else {
+            break;
         }
     }
 
-    return (true);
+    return (rc);
 }
 
 bool NeighOrch::removeNextHop(IpAddress ipAddress, string alias)
