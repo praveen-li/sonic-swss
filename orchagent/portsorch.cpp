@@ -32,11 +32,6 @@ extern NeighOrch *gNeighOrch;
 #define VLAN_PREFIX         "Vlan"
 #define DEFAULT_VLAN_ID     1
 
-static char* hostif_vlan_tag[] = {
-    [SAI_HOSTIF_VLAN_TAG_STRIP]     = "SAI_HOSTIF_VLAN_TAG_STRIP",
-    [SAI_HOSTIF_VLAN_TAG_KEEP]      = "SAI_HOSTIF_VLAN_TAG_KEEP",
-    [SAI_HOSTIF_VLAN_TAG_ORIGINAL]  = "SAI_HOSTIF_VLAN_TAG_ORIGINAL"
-};
 static map<string, sai_port_fec_mode_t> fec_mode_map =
 {
     { "none",  SAI_PORT_FEC_MODE_NONE },
@@ -444,50 +439,6 @@ bool PortsOrch::getPortPvid(Port &port, sai_uint32_t &pvid)
     }
 
     pvid = port.m_port_vlan_id;
-    return true;
-}
-
-bool PortsOrch::setHostIntfsStripTag(Port &port, sai_hostif_vlan_tag_t strip)
-{
-    SWSS_LOG_ENTER();
-    vector<Port> portv;
-
-    /*
-     * Before SAI_HOSTIF_VLAN_TAG_ORIGINAL is supported by libsai from all asic vendors,
-     * the VLAN tag on hostif is explicitly controlled with SAI_HOSTIF_VLAN_TAG_STRIP &
-     * SAI_HOSTIF_VLAN_TAG_KEEP attributes.
-     */
-    if (port.m_type == Port::PHY)
-    {
-        portv.push_back(port);
-    }
-    else if (port.m_type == Port::LAG)
-    {
-        getLagMember(port, portv);
-    }
-    else
-    {
-        SWSS_LOG_ERROR("port type %d not supported", port.m_type);
-        return false;
-    }
-
-    for (const auto p: portv)
-    {
-        sai_attribute_t attr;
-        attr.id = SAI_HOSTIF_ATTR_VLAN_TAG;
-        attr.value.s32 = strip;
-
-        sai_status_t status = sai_hostif_api->set_hostif_attribute(p.m_hif_id, &attr);
-        if (status != SAI_STATUS_SUCCESS)
-        {
-            SWSS_LOG_ERROR("Failed to set %s to host interface %s",
-                        hostif_vlan_tag[strip], p.m_alias.c_str());
-            return false;
-        }
-        SWSS_LOG_NOTICE("Set %s to host interface: %s",
-                        hostif_vlan_tag[strip], p.m_alias.c_str());
-    }
-
     return true;
 }
 
@@ -1472,7 +1423,7 @@ bool PortsOrch::initializePort(Port &p)
     initializeQueues(p);
 
     /* Create host interface */
-    addHostIntfs(p, p.m_alias, p.m_hif_id);
+    addHostIntfs(p.m_port_id, p.m_alias, p.m_hif_id);
 
 #if 0
     // TODO: Assure if_nametoindex(p.m_alias.c_str()) != 0
@@ -1500,7 +1451,7 @@ bool PortsOrch::initializePort(Port &p)
     return true;
 }
 
-bool PortsOrch::addHostIntfs(Port &port, string alias, sai_object_id_t &host_intfs_id)
+bool PortsOrch::addHostIntfs(sai_object_id_t id, string alias, sai_object_id_t &host_intfs_id)
 {
     SWSS_LOG_ENTER();
 
@@ -1512,7 +1463,7 @@ bool PortsOrch::addHostIntfs(Port &port, string alias, sai_object_id_t &host_int
     attrs.push_back(attr);
 
     attr.id = SAI_HOSTIF_ATTR_OBJ_ID;
-    attr.value.oid = port.m_port_id;
+    attr.value.oid = id;
     attrs.push_back(attr);
 
     attr.id = SAI_HOSTIF_ATTR_NAME;
@@ -1526,11 +1477,6 @@ bool PortsOrch::addHostIntfs(Port &port, string alias, sai_object_id_t &host_int
         return false;
     }
 
-    /*
-     * Port has been removed from 1q bridge at PortsOrch constructor,
-     * also start stripping off VLAN tag.
-     */
-    setHostIntfsStripTag(port, SAI_HOSTIF_VLAN_TAG_STRIP);
     SWSS_LOG_NOTICE("Create host interface for port %s", alias.c_str());
 
     return true;
@@ -1582,12 +1528,6 @@ bool PortsOrch::addBridgePort(Port &port)
         return false;
     }
 
-    if (!setHostIntfsStripTag(port, SAI_HOSTIF_VLAN_TAG_KEEP))
-    {
-        SWSS_LOG_ERROR("Failed to set %s for hostif of port %s",
-                hostif_vlan_tag[SAI_HOSTIF_VLAN_TAG_KEEP], port.m_alias.c_str());
-        return false;
-    }
     m_portList[port.m_alias] = port;
     SWSS_LOG_NOTICE("Add bridge port %s to default 1Q bridge", port.m_alias.c_str());
 
@@ -1612,13 +1552,6 @@ bool PortsOrch::removeBridgePort(Port &port)
     {
         SWSS_LOG_ERROR("Failed to set bridge port %s admin status to DOWN, rv:%d",
             port.m_alias.c_str(), status);
-        return false;
-    }
-
-    if (!setHostIntfsStripTag(port, SAI_HOSTIF_VLAN_TAG_STRIP))
-    {
-        SWSS_LOG_ERROR("Failed to set %s for hostif of port %s",
-                hostif_vlan_tag[SAI_HOSTIF_VLAN_TAG_STRIP], port.m_alias.c_str());
         return false;
     }
 
@@ -1904,15 +1837,6 @@ bool PortsOrch::addLagMember(Port &lag, Port &port)
 
     m_portList[lag.m_alias] = lag;
 
-    if (lag.m_bridge_port_id > 0)
-    {
-        if (!setHostIntfsStripTag(port, SAI_HOSTIF_VLAN_TAG_KEEP))
-        {
-            SWSS_LOG_ERROR("Failed to set %s for hostif of port %s which is in LAG %s",
-                    hostif_vlan_tag[SAI_HOSTIF_VLAN_TAG_KEEP], port.m_alias.c_str(), lag.m_alias.c_str());
-            return false;
-        }
-    }
     sai_uint32_t pvid;
     if (getPortPvid(lag, pvid))
     {
@@ -1945,15 +1869,6 @@ bool PortsOrch::removeLagMember(Port &lag, Port &port)
     lag.m_members.erase(port.m_alias);
     m_portList[lag.m_alias] = lag;
 
-    if (lag.m_bridge_port_id > 0)
-    {
-        if (!setHostIntfsStripTag(port, SAI_HOSTIF_VLAN_TAG_STRIP))
-        {
-            SWSS_LOG_ERROR("Failed to set %s for hostif of port %s which is leaving LAG %s",
-                    hostif_vlan_tag[SAI_HOSTIF_VLAN_TAG_STRIP], port.m_alias.c_str(), lag.m_alias.c_str());
-            return false;
-        }
-    }
     LagMemberUpdate update = { lag, port, false };
     notify(SUBJECT_TYPE_LAG_MEMBER_CHANGE, static_cast<void *>(&update));
 
