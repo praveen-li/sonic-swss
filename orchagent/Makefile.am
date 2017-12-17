@@ -21,7 +21,6 @@ orchagent_SOURCES = \
 		    main.cpp \
 		    port.cpp \
 		    orchdaemon.cpp \
-		    orchbase.cpp \
 		    orch.cpp \
 		    notifications.cpp \
 		    routeorch.cpp \
@@ -48,7 +47,6 @@ orchagent_SOURCES = \
 		    neighorch.h \
 		    notifications.h \
 		    observer.h \
-		    orchbase.h \
 		    orch.h \
 		    orchdaemon.h \
 		    pfcactionhandler.h \

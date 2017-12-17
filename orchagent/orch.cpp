@@ -4,6 +4,7 @@
 #include <sys/time.h>
 
 #include "orch.h"
+
 #include "subscriberstatetable.h"
 #include "portsorch.h"
 #include "tokenize.h"
@@ -24,33 +25,128 @@ extern string gRecordFile;
 extern string getTimestamp();
 
 Orch::Orch(DBConnector *db, string tableName)
-    :OrchBase(db, tableName)
 {
+    addConsumer(db, tableName);
 }
 
 Orch::Orch(DBConnector *db, vector<string> &tableNames)
-    :OrchBase(db, tableNames)
 {
+    for(auto it : tableNames)
+    {
+        addConsumer(db, it);
+    }
 }
 
 Orch::Orch(const vector<TableConnector>& tables)
-    :OrchBase(tables)
 {
+    for (auto it : tables)
+    {
+        addConsumer(it.first, it.second);
+    }
 }
 
 Orch::~Orch()
 {
+    for(auto &it : m_consumerMap)
+        delete it.second.m_consumer;
+
     if (gRecordOfs.is_open())
     {
         gRecordOfs.close();
     }
 }
 
+vector<Selectable *> Orch::getSelectables()
+{
+    vector<Selectable *> selectables;
+    for(auto it : m_consumerMap) {
+        selectables.push_back(it.second.m_consumer);
+    }
+    return selectables;
+}
+
+bool Orch::hasSelectable(TableConsumable *selectable) const
+{
+    for(auto it : m_consumerMap) {
+        if (it.second.m_consumer == selectable) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool Orch::execute(string tableName)
 {
-    lock_guard<mutex> lock(gDbMutex);
-    return OrchBase::execute(tableName);
+    SWSS_LOG_ENTER();
 
+    lock_guard<mutex> lock(gDbMutex);
+
+    auto consumer_it = m_consumerMap.find(tableName);
+    if (consumer_it == m_consumerMap.end())
+    {
+        SWSS_LOG_ERROR("Unrecognized tableName:%s\n", tableName.c_str());
+        return false;
+    }
+    Consumer& consumer = consumer_it->second;
+
+    std::deque<KeyOpFieldsValuesTuple> entries;
+    consumer.m_consumer->pops(entries);
+
+    /* Nothing popped */
+    if (entries.empty())
+    {
+        return true;
+    }
+
+    for (auto entry: entries)
+    {
+        string key = kfvKey(entry);
+        string op  = kfvOp(entry);
+
+        /* Record incoming tasks */
+        if (gSwssRecord)
+        {
+            recordTuple(consumer, entry);
+        }
+
+        /* If a new task comes or if a DEL task comes, we directly put it into consumer.m_toSync map */
+        if (consumer.m_toSync.find(key) == consumer.m_toSync.end() || op == DEL_COMMAND)
+        {
+           consumer.m_toSync[key] = entry;
+        }
+        /* If an old task is still there, we combine the old task with new task */
+        else
+        {
+            KeyOpFieldsValuesTuple existing_data = consumer.m_toSync[key];
+
+            auto new_values = kfvFieldsValues(entry);
+            auto existing_values = kfvFieldsValues(existing_data);
+
+
+            for (auto it : new_values)
+            {
+                string field = fvField(it);
+                string value = fvValue(it);
+
+                auto iu = existing_values.begin();
+                while (iu != existing_values.end())
+                {
+                    string ofield = fvField(*iu);
+                    if (field == ofield)
+                        iu = existing_values.erase(iu);
+                    else
+                        iu++;
+                }
+                existing_values.push_back(FieldValueTuple(field, value));
+            }
+            consumer.m_toSync[key] = KeyOpFieldsValuesTuple(key, op, existing_values);
+        }
+    }
+
+    if (!consumer.m_toSync.empty())
+        doTask(consumer);
+
+    return true;
 }
 
 /*
@@ -140,7 +236,11 @@ void Orch::doTask()
     if (!gPortsOrch->isInitDone())
         return;
 
-    OrchBase::doTask();
+    for(auto &it : m_consumerMap)
+    {
+        if (!it.second.m_toSync.empty())
+            doTask(it.second);
+    }
 }
 
 void Orch::logfileReopen()
@@ -164,11 +264,6 @@ void Orch::logfileReopen()
 
 void Orch::recordTuple(Consumer &consumer, KeyOpFieldsValuesTuple &tuple)
 {
-    if (!gSwssRecord)
-    {
-        return;
-    }
-
     string s = consumer.m_consumer->getTableName() + ":" + kfvKey(tuple)
                + "|" + kfvOp(tuple);
     for (auto i = kfvFieldsValues(tuple).begin(); i != kfvFieldsValues(tuple).end(); i++)
@@ -269,5 +364,12 @@ bool Orch::parseIndexRange(const string &input, sai_uint32_t &range_low, sai_uin
 
 void Orch::addConsumer(DBConnector *db, string tableName)
 {
-    OrchBase::addConsumer(db, tableName, gBatchSize);
+    if (db->getDB() == CONFIG_DB)
+    {
+        Consumer consumer(new SubscriberStateTable(db, tableName));
+        m_consumerMap.insert(ConsumerMapPair(tableName, consumer));
+    } else {
+        Consumer consumer(new ConsumerStateTable(db, tableName, gBatchSize));
+        m_consumerMap.insert(ConsumerMapPair(tableName, consumer));
+    }
 }
