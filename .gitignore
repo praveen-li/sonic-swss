@@ -44,7 +44,6 @@ teamsyncd/teamsyncd
 fpmsyncd/fpmsyncd
 intfsyncd/intfsyncd
 cfgagent/vlanmgrd
-cfgagent/intfmgrd
 neighsyncd/neighsyncd
 portsyncd/portsyncd
 orchagent/orchagent
