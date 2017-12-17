@@ -2,7 +2,6 @@
 #include "logger.h"
 #include "saiserialize.h"
 #include "portsorch.h"
-
 #include <vector>
 
 #define PFC_WD_QUEUE_STATUS             "PFC_WD_STATUS"
@@ -17,6 +16,7 @@
 
 extern sai_object_id_t gSwitchId;
 extern PortsOrch *gPortsOrch;
+extern AclOrch * gAclOrch;
 extern sai_port_api_t *sai_port_api;
 extern sai_queue_api_t *sai_queue_api;
 extern sai_buffer_api_t *sai_buffer_api;
@@ -34,7 +34,7 @@ PfcWdActionHandler::PfcWdActionHandler(sai_object_id_t port, sai_object_id_t que
             "PFC Watchdog detected PFC storm on queue 0x%lx port 0x%lx",
             m_queue,
             m_port);
-    
+
     m_stats = getQueueStats(m_countersTable, sai_serialize_object_id(m_queue));
     m_stats.detectCount++;
     m_stats.operational = false;
@@ -132,6 +132,112 @@ void PfcWdActionHandler::updateWdCounters(const string& queueIdStr, const PfcWdQ
 
     m_countersTable->set(queueIdStr, resultFvValues);
 }
+
+PfcWdAclHandler::PfcWdAclHandler(sai_object_id_t port, sai_object_id_t queue,
+        uint8_t queueId, shared_ptr<Table> countersTable):
+    PfcWdActionHandler(port, queue, queueId, countersTable)
+{
+    SWSS_LOG_ENTER();
+
+    acl_table_type_t table_type = ACL_TABLE_L3;
+
+    // There is one handler instance per queue ID
+    string queuestr = to_string(queueId);
+    m_strIngressTable = "IngressTable_PfcWdAclHandler_" + queuestr;
+    m_strEgressTable = "EgressTable_PfcWdAclHandler_" + queuestr;
+    m_strRule = "Rule_PfcWdAclHandler_" + queuestr;
+
+    auto found = m_aclTables.find(m_strIngressTable);
+    if (found == m_aclTables.end())
+    {
+        // First time of handling PFC for this queue, create ACL table, and bind
+        createPfcAclTable(port, m_strIngressTable, true);
+        shared_ptr<AclRuleL3> newRule = make_shared<AclRuleL3>(gAclOrch, m_strRule, m_strIngressTable, table_type);
+        createPfcAclRule(newRule, queueId, m_strIngressTable);
+    }
+    else
+    {
+        // Otherwise just bind ACL table with the port
+        found->second.bind(port);
+    }
+
+    found = m_aclTables.find(m_strEgressTable);
+    if (found == m_aclTables.end())
+    {
+        // First time of handling PFC for this queue, create ACL table, and bind
+        createPfcAclTable(port, m_strEgressTable, false);
+        shared_ptr<AclRuleL3> newRule = make_shared<AclRuleL3>(gAclOrch, m_strRule, m_strEgressTable, table_type);
+        createPfcAclRule(newRule, queueId, m_strEgressTable);
+    }
+    else
+    {
+        // Otherwise just bind ACL table with the port
+        found->second.bind(port);
+    }
+}
+
+PfcWdAclHandler::~PfcWdAclHandler(void)
+{
+    SWSS_LOG_ENTER();
+
+    auto found = m_aclTables.find(m_strIngressTable);
+    found->second.unbind(getPort());
+
+    found = m_aclTables.find(m_strEgressTable);
+    found->second.unbind(getPort());
+}
+
+void PfcWdAclHandler::clear()
+{
+    SWSS_LOG_ENTER();
+
+    for (auto& tablepair: m_aclTables)
+    {
+        auto& table = tablepair.second;
+        gAclOrch->removeAclTable(table.getId());
+    }
+}
+
+void PfcWdAclHandler::createPfcAclTable(sai_object_id_t port, string strTable, bool ingress)
+{
+    SWSS_LOG_ENTER();
+
+    auto inserted = m_aclTables.emplace(piecewise_construct,
+        std::forward_as_tuple(strTable),
+        std::forward_as_tuple());
+
+    assert(inserted.second);
+
+    AclTable& aclTable = inserted.first->second;
+    aclTable.type = ACL_TABLE_L3;
+    aclTable.link(port);
+    aclTable.id = strTable;
+    aclTable.stage = ingress ? ACL_STAGE_INGRESS : ACL_STAGE_EGRESS;
+    gAclOrch->addAclTable(aclTable, strTable);
+}
+
+void PfcWdAclHandler::createPfcAclRule(shared_ptr<AclRuleL3> rule, uint8_t queueId, string strTable)
+{
+    SWSS_LOG_ENTER();
+
+    string attr_name, attr_value;
+
+    attr_name = RULE_PRIORITY;
+    attr_value = "999";
+    rule->validateAddPriority(attr_name, attr_value);
+
+    attr_name = MATCH_TC;
+    attr_value = to_string(queueId);
+    rule->validateAddMatch(attr_name, attr_value);
+
+    attr_name = ACTION_PACKET_ACTION;
+    attr_value = PACKET_ACTION_DROP;
+    rule->validateAddAction(attr_name, attr_value);
+
+    gAclOrch->addAclRule(rule, strTable);
+}
+
+std::map<std::string, AclTable> PfcWdAclHandler::m_aclTables;
 
 PfcWdLossyHandler::PfcWdLossyHandler(sai_object_id_t port, sai_object_id_t queue,
         uint8_t queueId, shared_ptr<Table> countersTable):

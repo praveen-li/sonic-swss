@@ -5,22 +5,7 @@
 #include "schema.h"
 #include "ipprefix.h"
 #include "converter.h"
-
-/*
- * FIXME: -DESIGN DEFECT
- * As of today (8/12/2017), the design for ACL is that we use external entity
- * swssconfig to load the ACL configurations to APP-DB,  the code here in the
- * orchagent will pickup the changes and sync to ASIC-DB. Some validations were done
- * at this stage, however, even if the validation failed, we have no way or at least
- * it was not the orchagent's resposibility to deal with upstream APP-DB, this will
- * leave inconsistency states in the DBs. e,g, between APP-DB and ASIC-DB/HW.
- * Hopefull with the configDB design, we should moved the validation logic to configMgmt
- * before the configDB, configMgmt will decide to inject the entries to DB or not.
- * Also, if we have to have some validation logic downstream, the configDB design
- * should have provided the feedback system to set config entry with pending/active flag,
- * and if downstream does not qualify the config, configMgmt should roll back the config.
- * There are more issues to be describled later in the code as well.
- */
+#include "timer.h"
 
 using namespace std;
 using namespace swss;
@@ -40,15 +25,6 @@ extern sai_port_api_t*   sai_port_api;
 extern sai_switch_api_t* sai_switch_api;
 extern sai_object_id_t   gSwitchId;
 extern PortsOrch*        gPortsOrch;
-
-/* For displaying the type */
-const char *AclTableTypeString[] =
-{
-    "ACL_TABLE_UNKNOWN",
-    "ACL_TABLE_L3",
-    "ACL_TABLE_L3V6",
-    "ACL_TABLE_MIRROR"
-};
 
 acl_rule_attr_lookup_t aclMatchLookup =
 {
@@ -80,6 +56,12 @@ static acl_table_type_lookup_t aclTableTypeLookUp =
     { TABLE_TYPE_L3,     ACL_TABLE_L3 },
     { TABLE_TYPE_L3V6,   ACL_TABLE_L3V6 },
     { TABLE_TYPE_MIRROR, ACL_TABLE_MIRROR }
+};
+
+static acl_stage_type_lookup_t aclStageLookUp =
+{
+    {TABLE_INGRESS, ACL_STAGE_INGRESS },
+    {TABLE_EGRESS,  ACL_STAGE_EGRESS }
 };
 
 static acl_ip_type_lookup_t aclIpTypeLookup =
@@ -246,14 +228,11 @@ bool AclRule::validateAddMatch(string attr_name, string attr_value)
             memcpy(value.aclfield.data.ip6, ip.getIp().getV6Addr(), 16);
             memcpy(value.aclfield.mask.ip6, ip.getMask().getV6Addr(), 16);
         }
-        else if ((attr_name == MATCH_L4_SRC_PORT_RANGE)
-	    || (attr_name == MATCH_L4_DST_PORT_RANGE))
+        else if ((attr_name == MATCH_L4_SRC_PORT_RANGE) || (attr_name == MATCH_L4_DST_PORT_RANGE))
         {
-            if (sscanf(attr_value.c_str(), "%d-%d", &value.u32range.min,
-	        &value.u32range.max) != 2)
+            if (sscanf(attr_value.c_str(), "%d-%d", &value.u32range.min, &value.u32range.max) != 2)
             {
-                SWSS_LOG_ERROR("Range parse error. Attribute: %s, value: %s",
-		    attr_name.c_str(), attr_value.c_str());
+                SWSS_LOG_ERROR("Range parse error. Attribute: %s, value: %s", attr_name.c_str(), attr_value.c_str());
                 return false;
             }
 
@@ -501,10 +480,15 @@ shared_ptr<AclRule> AclRule::makeShared(acl_table_type_t type, AclOrch *acl, Mir
     {
         return make_shared<AclRuleMirror>(acl, mirror, rule, table, type);
     }
-    /* L3/L3V6 rules can exist only in L3/L3V6 table (ipv4 or ipv6) */
-    else if (type == ACL_TABLE_L3 || type == ACL_TABLE_L3V6)
+    /* L3 rules can exist only in L3 table */
+    else if (type == ACL_TABLE_L3)
     {
         return make_shared<AclRuleL3>(acl, rule, table, type);
+    }
+	/* L3V6 rules can exist only in L3V6 table */
+    else if (type == ACL_TABLE_L3V6)
+    {
+	    return make_shared<AclRuleL3V6>(acl, rule, table, type);
     }
 
     throw runtime_error("Wrong combination of table type and action in rule " + rule);
@@ -644,7 +628,7 @@ sai_object_id_t AclRuleL3::getRedirectObjectId(const string& redirect_value)
 
     // Try to parse physical port and LAG first
     Port port;
-    if(m_pAclOrch->m_portOrch->getPort(target, port))
+    if (gPortsOrch->getPort(target, port))
     {
         if (port.m_type == Port::PHY)
         {
@@ -717,6 +701,11 @@ bool AclRuleL3::validateAddMatch(string attr_name, string attr_value)
         SWSS_LOG_ERROR("DSCP match is not supported for the tables of type L3");
         return false;
     }
+    if (attr_name == MATCH_SRC_IPV6 || attr_name == MATCH_DST_IPV6)
+    {
+        SWSS_LOG_ERROR("IPv6 address match is not supported for the tables of type L3");
+        return false;
+    }
 
     return AclRule::validateAddMatch(attr_name, attr_value);
 }
@@ -736,6 +725,28 @@ bool AclRuleL3::validate()
 void AclRuleL3::update(SubjectType, void *)
 {
     // Do nothing
+}
+
+AclRuleL3V6::AclRuleL3V6(AclOrch *aclOrch, string rule, string table, acl_table_type_t type) :
+        AclRuleL3(aclOrch, rule, table, type)
+{
+}
+
+
+bool AclRuleL3V6::validateAddMatch(string attr_name, string attr_value)
+{
+    if (attr_name == MATCH_DSCP)
+    {
+        SWSS_LOG_ERROR("DSCP match is not supported for the tables of type L3V6");
+        return false;
+    }
+    if (attr_name == MATCH_SRC_IP || attr_name == MATCH_DST_IP)
+    {
+        SWSS_LOG_ERROR("IPv4 address match is not supported for the tables of type L3V6");
+        return false;
+    }
+
+    return AclRule::validateAddMatch(attr_name, attr_value);
 }
 
 AclRuleMirror::AclRuleMirror(AclOrch *aclOrch, MirrorOrch *mirror, string rule, string table, acl_table_type_t type) :
@@ -766,7 +777,7 @@ bool AclRuleMirror::validateAddAction(string attr_name, string attr_value)
 
 bool AclRuleMirror::validateAddMatch(string attr_name, string attr_value)
 {
-    if ((m_tableType == ACL_TABLE_L3 || m_tableType == ACL_TABLE_L3)
+    if ((m_tableType == ACL_TABLE_L3 || m_tableType == ACL_TABLE_L3V6)
 	&& attr_name == MATCH_DSCP)
     {
         SWSS_LOG_ERROR("DSCP match is not supported for the tables of type L3");
@@ -884,6 +895,245 @@ void AclRuleMirror::update(SubjectType type, void *cntx)
         SWSS_LOG_INFO("Deactivating mirroring ACL %s for session %s", m_id.c_str(), m_sessionName.c_str());
         remove();
     }
+}
+
+bool AclTable::validate()
+{
+    if (type == ACL_TABLE_UNKNOWN) return false;
+    if (ports.empty()) return false;
+    return true;
+}
+
+bool AclTable::create()
+{
+    SWSS_LOG_ENTER();
+
+    if (stage == ACL_STAGE_UNKNOWN)
+    {
+        SWSS_LOG_ERROR("Unknown ACL stage for ACL table %s", id.c_str());
+        return false;
+    }
+
+    sai_attribute_t attr;
+    vector<sai_attribute_t> table_attrs;
+
+    int32_t range_types_list[] =
+        { SAI_ACL_RANGE_TYPE_L4_DST_PORT_RANGE,
+          SAI_ACL_RANGE_TYPE_L4_SRC_PORT_RANGE
+        };
+
+    attr.id = SAI_ACL_TABLE_ATTR_ACL_BIND_POINT_TYPE_LIST;
+    vector<int32_t> bpoint_list;
+    bpoint_list.push_back(SAI_ACL_BIND_POINT_TYPE_PORT);
+    attr.value.s32list.count = 1;
+    attr.value.s32list.list = bpoint_list.data();
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_ETHER_TYPE;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_ACL_IP_TYPE;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_IP_PROTOCOL;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    if (type == ACL_TABLE_L3V6) {
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IPV6;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+    }
+    else
+    {
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IP;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IP;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+    }
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_L4_SRC_PORT;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_TCP_FLAGS;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_TC;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    if(stage == ACL_STAGE_INGRESS)
+    {
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_ACL_RANGE_TYPE;
+        attr.value.s32list.count = (uint32_t)(sizeof(range_types_list) / sizeof(range_types_list[0]));
+        attr.value.s32list.list = range_types_list;
+        table_attrs.push_back(attr);
+    }
+
+    attr.id = SAI_ACL_TABLE_ATTR_ACL_STAGE;
+    attr.value.s32 = stage == ACL_STAGE_INGRESS ? SAI_ACL_STAGE_INGRESS : SAI_ACL_STAGE_EGRESS;
+    table_attrs.push_back(attr);
+
+    if (type == ACL_TABLE_MIRROR)
+    {
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DSCP;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+    }
+
+    sai_status_t status = sai_acl_api->create_acl_table(&m_oid, gSwitchId, (uint32_t)table_attrs.size(), table_attrs.data());
+    return status == SAI_STATUS_SUCCESS;
+}
+
+bool AclTable::bind(sai_object_id_t portOid)
+{
+    SWSS_LOG_ENTER();
+
+    assert(ports.find(portOid) != ports.end());
+
+    sai_object_id_t group_member_oid;
+    if (!gPortsOrch->bindAclTable(portOid, m_oid, group_member_oid, stage))
+    {
+        return false;
+    }
+
+    ports[portOid] = group_member_oid;
+
+    return true;
+}
+
+bool AclTable::unbind(sai_object_id_t portOid)
+{
+    SWSS_LOG_ENTER();
+
+    sai_object_id_t member = ports[portOid];
+    sai_status_t status = sai_acl_api->remove_acl_table_group_member(member);
+    if (status != SAI_STATUS_SUCCESS) {
+        SWSS_LOG_ERROR("Failed to unbind table %lu as member %lu from ACL table: %d",
+                m_oid, member, status);
+        return false;
+    }
+    return true;
+}
+
+bool AclTable::bind()
+{
+    SWSS_LOG_ENTER();
+
+    for (const auto& portpair: ports)
+    {
+        sai_object_id_t portOid = portpair.first;
+        bool suc = bind(portOid);
+        if (!suc) return false;
+    }
+    return true;
+}
+
+bool AclTable::unbind()
+{
+    SWSS_LOG_ENTER();
+
+    for (const auto& portpair: ports)
+    {
+        sai_object_id_t portOid = portpair.first;
+        bool suc = unbind(portOid);
+        if (!suc) return false;
+    }
+    return true;
+}
+
+void AclTable::link(sai_object_id_t portOid)
+{
+    SWSS_LOG_ENTER();
+
+    ports.emplace(portOid, SAI_NULL_OBJECT_ID);
+}
+
+bool AclTable::add(shared_ptr<AclRule> newRule)
+{
+    SWSS_LOG_ENTER();
+
+    string rule_id = newRule->getId();
+    auto ruleIter = rules.find(rule_id);
+    if (ruleIter != rules.end())
+    {
+        // If ACL rule already exists, delete it first
+        if (ruleIter->second->remove())
+        {
+            rules.erase(ruleIter);
+            SWSS_LOG_NOTICE("Successfully deleted ACL rule: %s", rule_id.c_str());
+        }
+    }
+
+    if (newRule->create())
+    {
+        rules[rule_id] = newRule;
+        SWSS_LOG_NOTICE("Successfully created ACL rule %s in table %s", rule_id.c_str(), id.c_str());
+        return true;
+    }
+    else
+    {
+        SWSS_LOG_ERROR("Failed to create rule in table %s", id.c_str());
+        return false;
+    }
+}
+
+bool AclTable::remove(string rule_id)
+{
+    SWSS_LOG_ENTER();
+
+    auto ruleIter = rules.find(rule_id);
+    if (ruleIter != rules.end())
+    {
+        if (ruleIter->second->remove())
+        {
+            rules.erase(ruleIter);
+            SWSS_LOG_NOTICE("Successfully deleted ACL rule %s", rule_id.c_str());
+            return true;
+        }
+        else
+        {
+            SWSS_LOG_ERROR("Failed to delete ACL rule: %s", rule_id.c_str());
+            return false;
+        }
+    }
+    else
+    {
+        SWSS_LOG_WARN("Skip deleting ACL rule. Unknown rule %s", rule_id.c_str());
+        return true;
+    }
+}
+
+bool AclTable::clear()
+{
+    SWSS_LOG_ENTER();
+
+    for (auto& rulepair: rules)
+    {
+        auto& rule = *rulepair.second;
+        bool suc = rule.remove();
+        if (!suc)
+        {
+            SWSS_LOG_ERROR("Failed to delete existing ACL rule %s when removing the ACL table %s", rule.getId().c_str(), id.c_str());
+            return false;
+        }
+    }
+    rules.clear();
+    return true;
 }
 
 AclRuleCounters AclRuleMirror::getCounters()
@@ -1025,7 +1275,6 @@ bool AclRange::remove()
 
 AclOrch::AclOrch(DBConnector *db, vector<string> tableNames, PortsOrch *portOrch, MirrorOrch *mirrorOrch, NeighOrch *neighOrch, RouteOrch *routeOrch) :
         Orch(db, tableNames),
-        m_portOrch(portOrch),
         m_mirrorOrch(mirrorOrch),
         m_neighOrch(neighOrch),
         m_routeOrch(routeOrch)
@@ -1052,7 +1301,11 @@ AclOrch::AclOrch(DBConnector *db, vector<string> tableNames, PortsOrch *portOrch
 
     // Should be initialized last to guaranty that object is
     // initialized before thread start.
-    m_countersThread = thread(AclOrch::collectCountersThread, this);
+    auto interv = timespec { .tv_sec = COUNTERS_READ_INTERVAL, .tv_nsec = 0 };
+    auto timer = new SelectableTimer(interv);
+    auto executor = new ExecutableTimer(timer, this);
+    Orch::addExecutor("", executor);
+    timer->start();
 }
 
 AclOrch::~AclOrch()
@@ -1061,8 +1314,6 @@ AclOrch::~AclOrch()
 
     m_bCollectCounters = false;
     m_sleepGuard.notify_all();
-
-    m_countersThread.join();
 }
 
 void AclOrch::update(SubjectType type, void *cntx)
@@ -1089,13 +1340,12 @@ void AclOrch::doTask(Consumer &consumer)
 {
     SWSS_LOG_ENTER();
 
-    if (!m_portOrch->isInitDone())
+    if (!gPortsOrch->isInitDone())
     {
-        /* Wait for ports initialization */
         return;
     }
 
-    string table_name = consumer.m_consumer->getTableName();
+    string table_name = consumer.getTableName();
 
     if (table_name == CFG_ACL_TABLE_NAME)
     {
@@ -1115,83 +1365,21 @@ void AclOrch::doTask(Consumer &consumer)
 
 bool AclOrch::addAclTable(AclTable &newTable, string table_id)
 {
+    SWSS_LOG_ENTER();
+
     sai_object_id_t table_oid = getTableById(table_id);
 
     if (table_oid != SAI_NULL_OBJECT_ID)
     {
-
-        /*
-         * There are a few cases when the table exists:
-         * If we see there is no rules in the table, we can
-         * delete and create to keep the consitency.
-         * In case the table has associated rules, we could :
-         * 1, delete the ACL table and add it back (old code use this)
-         * 2: delete all associated rules of the table, then delete and
-         *     create the new ACL table
-         * 3, don't touch the ASIC-DB/HW and report error
-         * option 1 will fail due the resource sharing and will create low
-         * level inconsistency.
-         * option 2 will create inconsitency of the rules between APP-DB
-         * and ASIS-DB.
-         * option 3 will create inconsitency of the ACL able between APP-DB
-         * and ASIC-DB/HW.
-         * Here we just use option 3. And print the error message with the
-         * details for user to restore it manually by inject the old ACL table.
-         * The ultimate fix should be the design change as mentioned at beginning
-         */
-        if (m_AclTables[table_oid].rules.empty())
+        /* If ACL table exists, remove the table first.*/
+        if (!removeAclTable(table_id))
         {
-            if (deleteUnbindAclTable(table_oid) == SAI_STATUS_SUCCESS)
-            {
-                SWSS_LOG_INFO("Successfully deleted ACL table %s", table_id.c_str());
-                m_AclTables.erase(table_oid);
-            }
-            else
-            {
-                /* fail to delete, log it and print error */
-                SWSS_LOG_ERROR("Failed to delete ACL table: %s.",
-                  table_id.c_str());
-                return false;
-            }
-        }
-        else
-        {
-            if (m_AclTables[table_oid].id == newTable.id &&
-              m_AclTables[table_oid].description == newTable.description &&
-              m_AclTables[table_oid].type == newTable.type &&
-              m_AclTables[table_oid].ports == newTable.ports)
-            {
-                SWSS_LOG_NOTICE("Table added has the same info before: %s",
-                  table_id.c_str());
-            }
-            else
-            {
-                /* get the alias names of the portlist*/
-                Port port;
-                ports_list_t portlist = m_AclTables[table_oid].ports;
-                string portname_str;
-                for (auto port_it = portlist.begin(); port_it != portlist.end();
-                     port_it++)
-                {
-                    m_portOrch->getPort(*port_it, port);
-                    portname_str += port.m_alias + ",";
-                }
-
-                /* ignore the changes, log details for retoring */
-                SWSS_LOG_ERROR("ACL table was not inserted because "
-                  "the same key exists with rules,"
-                  " please restore with this inforamtion: table_id: %s, "
-                  "desciption: %s, type: %s, ports: %s. ",
-                  m_AclTables[table_oid].id.c_str(),
-                  m_AclTables[table_oid].description.c_str(),
-                  AclTableTypeString[m_AclTables[table_oid].type],
-                  portname_str.c_str());
-            }
+            SWSS_LOG_ERROR("Fail to remove the exsiting ACL table %s when try to add the new one.", table_id.c_str());
             return false;
         }
     }
 
-    if (createBindAclTable(newTable, table_oid) == SAI_STATUS_SUCCESS)
+    if (createBindAclTable(newTable, table_oid))
     {
         m_AclTables[table_oid] = newTable;
         SWSS_LOG_NOTICE("Successfully created ACL table %s, oid: %lX", newTable.description.c_str(), table_oid);
@@ -1206,6 +1394,8 @@ bool AclOrch::addAclTable(AclTable &newTable, string table_id)
 
 bool AclOrch::removeAclTable(string table_id)
 {
+    SWSS_LOG_ENTER();
+
     sai_object_id_t table_oid = getTableById(table_id);
     if (table_oid == SAI_NULL_OBJECT_ID)
     {
@@ -1213,12 +1403,9 @@ bool AclOrch::removeAclTable(string table_id)
         return true;
     }
 
-    /* If ACL rules associate with this table, dont't delete it */
-    if (!m_AclTables[table_oid].rules.empty())
-    {
-        SWSS_LOG_ERROR("Failed to remove the ACL table %s", table_id.c_str());
-        return false;
-    }
+    /* If ACL rules associate with this table, remove the rules first.*/
+    bool suc = m_AclTables[table_oid].clear();
+    if (!suc) return false;
 
     if (deleteUnbindAclTable(table_oid) == SAI_STATUS_SUCCESS)
     {
@@ -1233,37 +1420,16 @@ bool AclOrch::removeAclTable(string table_id)
     }
 }
 
-bool AclOrch::addAclRule(shared_ptr<AclRule> newRule, string table_id, string rule_id)
+bool AclOrch::addAclRule(shared_ptr<AclRule> newRule, string table_id)
 {
     sai_object_id_t table_oid = getTableById(table_id);
     if (table_oid == SAI_NULL_OBJECT_ID)
     {
-        SWSS_LOG_ERROR("Failed to add ACL rule %s in ACL table %s. Table doesn't exist", rule_id.c_str(), table_id.c_str());
+        SWSS_LOG_ERROR("Failed to add ACL rule in ACL table %s. Table doesn't exist", table_id.c_str());
         return false;
     }
 
-    auto ruleIter = m_AclTables[table_oid].rules.find(rule_id);
-    if (ruleIter != m_AclTables[table_oid].rules.end())
-    {
-        // If ACL rule already exists, delete it first
-        if (ruleIter->second->remove())
-        {
-            m_AclTables[table_oid].rules.erase(ruleIter);
-            SWSS_LOG_NOTICE("Successfully deleted ACL rule: %s", rule_id.c_str());
-        }
-    }
-
-    if (newRule->create())
-    {
-        m_AclTables[table_oid].rules[rule_id] = newRule;
-        SWSS_LOG_NOTICE("Successfully created ACL rule %s in table %s", rule_id.c_str(), table_id.c_str());
-        return true;
-    }
-    else
-    {
-        SWSS_LOG_ERROR("Failed to create rule in table %s", table_id.c_str());
-        return false;
-    }
+    return m_AclTables[table_oid].add(newRule);
 }
 
 bool AclOrch::removeAclRule(string table_id, string rule_id)
@@ -1275,34 +1441,8 @@ bool AclOrch::removeAclRule(string table_id, string rule_id)
         return true;
     }
 
-    auto ruleIter = m_AclTables[table_oid].rules.find(rule_id);
-    if (ruleIter != m_AclTables[table_oid].rules.end())
-    {
-        if (ruleIter->second->remove())
-        {
-            m_AclTables[table_oid].rules.erase(ruleIter);
-            SWSS_LOG_NOTICE("Successfully deleted ACL rule %s", rule_id.c_str());
-            return true;
-        }
-        else
-        {
-            SWSS_LOG_ERROR("Failed to delete ACL rule: %s", table_id.c_str());
-            return false;
-        }
-    }
-    else
-    {
-        SWSS_LOG_WARN("Skip deleting ACL rule. Unknown rule %s", rule_id.c_str());
-        return true;
-    }
+    return m_AclTables[table_oid].remove(rule_id);
 }
-
-/*
- * FIXME:
- * Many of the error pathes in this function were not handled other than logging for now
- * This basically will lead to inconsitent state in APP-DB and ASIC-DB.
- * Ultimate fix was describled in the beginning of the file
- */
 
 void AclOrch::doAclTableTask(Consumer &consumer)
 {
@@ -1341,21 +1481,32 @@ void AclOrch::doAclTableTask(Consumer &consumer)
                 {
                     if (!processAclTableType(attr_value, newTable.type))
                     {
-                        SWSS_LOG_ERROR("Failed to process table type for table %s",
-                                     table_id.c_str());
+                        SWSS_LOG_ERROR("Failed to process table type for table %s", table_id.c_str());
                         bAllAttributesOk = false;
                         break;
                     }
                 }
                 else if (attr_name == TABLE_PORTS)
                 {
-                    if (!processPorts(attr_value, newTable.ports))
+                    bool suc = processPorts(attr_value, [&](sai_object_id_t portOid) {
+                        newTable.link(portOid);
+                    });
+
+                    if (!suc)
                     {
-                        SWSS_LOG_ERROR("Failed to process table ports for table %s",
-                          table_id.c_str());
+                        SWSS_LOG_ERROR("Failed to process table ports for table %s", table_id.c_str());
                         bAllAttributesOk = false;
                         break;
                     }
+                }
+                else if (attr_name == TABLE_STAGE)
+                {
+                   if (!processAclTableStage(attr_value, newTable.stage))
+                   {
+                       SWSS_LOG_ERROR("Failed to process table stage for table %s", table_id.c_str());
+                       bAllAttributesOk = false;
+                       break;
+                   }
                 }
                 else
                 {
@@ -1365,7 +1516,7 @@ void AclOrch::doAclTableTask(Consumer &consumer)
                 }
             }
             // validate and create ACL Table
-            if (bAllAttributesOk && validateAclTable(newTable))
+            if (bAllAttributesOk && newTable.validate())
             {
                 if (addAclTable(newTable, table_id))
                     it = consumer.m_toSync.erase(it);
@@ -1456,7 +1607,7 @@ void AclOrch::doAclRuleTask(Consumer &consumer)
             // validate and create ACL rule
             if (bAllAttributesOk && newRule->validate())
             {
-                if(addAclRule(newRule, table_id, rule_id))
+                if(addAclRule(newRule, table_id))
                     it = consumer.m_toSync.erase(it);
                 else
                     it++;
@@ -1482,7 +1633,7 @@ void AclOrch::doAclRuleTask(Consumer &consumer)
     }
 }
 
-bool AclOrch::processPorts(string portsList, ports_list_t& out)
+bool AclOrch::processPorts(string portsList, std::function<void (sai_object_id_t)> inserter)
 {
     SWSS_LOG_ENTER();
 
@@ -1509,7 +1660,7 @@ bool AclOrch::processPorts(string portsList, ports_list_t& out)
     for (const auto& alias : strList)
     {
         Port port;
-        if (!m_portOrch->getPort(alias, port))
+        if (!gPortsOrch->getPort(alias, port))
         {
             SWSS_LOG_ERROR("Failed to process port. Port %s doesn't exist", alias.c_str());
             return false;
@@ -1521,7 +1672,7 @@ bool AclOrch::processPorts(string portsList, ports_list_t& out)
             return false;
         }
 
-        out.push_back(port.m_port_id);
+        inserter(port.m_port_id);
     }
 
     return true;
@@ -1543,6 +1694,25 @@ bool AclOrch::processAclTableType(string type, acl_table_type_t &table_type)
     return true;
 }
 
+bool AclOrch::processAclTableStage(string stage, acl_stage_type_t &acl_stage)
+{
+    SWSS_LOG_ENTER();
+
+    auto iter = aclStageLookUp.find(toUpper(stage));
+
+    if (iter == aclStageLookUp.end())
+    {
+        acl_stage = ACL_STAGE_UNKNOWN;
+        return false;
+    }
+
+    acl_stage = iter->second;
+
+    return true;
+}
+
+
+
 sai_object_id_t AclOrch::getTableById(string table_id)
 {
     SWSS_LOG_ENTER();
@@ -1558,116 +1728,21 @@ sai_object_id_t AclOrch::getTableById(string table_id)
     return SAI_NULL_OBJECT_ID;
 }
 
-bool AclOrch::validateAclTable(AclTable &aclTable)
+bool AclOrch::createBindAclTable(AclTable &aclTable, sai_object_id_t &table_oid)
 {
     SWSS_LOG_ENTER();
 
-    if (aclTable.type == ACL_TABLE_UNKNOWN || aclTable.ports.size() == 0)
+    bool suc = aclTable.create();
+    if (!suc) return false;
+
+    table_oid = aclTable.getOid();
+    sai_status_t status = bindAclTable(table_oid, aclTable);
+    if (status != SAI_STATUS_SUCCESS)
     {
+        SWSS_LOG_ERROR("Failed to bind table %s to ports", aclTable.description.c_str());
         return false;
     }
-
     return true;
-}
-
-sai_status_t AclOrch::createBindAclTable(AclTable &aclTable, sai_object_id_t &table_oid)
-{
-    SWSS_LOG_ENTER();
-
-    sai_status_t status;
-    sai_attribute_t attr;
-    vector<sai_attribute_t> table_attrs;
-    int32_t range_types_list[] =
-        { SAI_ACL_RANGE_TYPE_L4_DST_PORT_RANGE,
-          SAI_ACL_RANGE_TYPE_L4_SRC_PORT_RANGE
-        };
-
-    attr.id = SAI_ACL_TABLE_ATTR_ACL_BIND_POINT_TYPE_LIST;
-    vector<int32_t> bpoint_list;
-    /* TODO: Use the binding type */
-    bpoint_list.push_back(SAI_ACL_BIND_POINT_TYPE_PORT);
-    attr.value.s32list.count = 1;
-    attr.value.s32list.list = bpoint_list.data();
-    table_attrs.push_back(attr);
-
-    /* TODO: Use the stage field */
-    attr.id = SAI_ACL_TABLE_ATTR_ACL_STAGE;
-    attr.value.s32 = SAI_ACL_STAGE_INGRESS;
-    table_attrs.push_back(attr);
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_ETHER_TYPE;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_ACL_IP_TYPE;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_IP_PROTOCOL;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
-
-    if (aclTable.type == ACL_TABLE_L3V6) {
-        attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6;
-        attr.value.booldata = true;
-        table_attrs.push_back(attr);
-
-        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IPV6;
-        attr.value.booldata = true;
-        table_attrs.push_back(attr);
-        SWSS_LOG_INFO("using ipv6 table fields");
-    }
-    else
-    {
-        attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IP;
-        attr.value.booldata = true;
-        table_attrs.push_back(attr);
-
-        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IP;
-        attr.value.booldata = true;
-        table_attrs.push_back(attr);
-        SWSS_LOG_INFO("using ipv4 table fields");
-    }
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_L4_SRC_PORT;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_TCP_FLAGS;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_TC;
-    attr.value.booldata = true;
-    table_attrs.push_back(attr);
-
-    if (aclTable.type == ACL_TABLE_MIRROR)
-    {
-        attr.id = SAI_ACL_TABLE_ATTR_FIELD_DSCP;
-        attr.value.booldata = true;
-        table_attrs.push_back(attr);
-    }
-
-    attr.id = SAI_ACL_TABLE_ATTR_FIELD_ACL_RANGE_TYPE;
-    attr.value.s32list.count = (uint32_t)(sizeof(range_types_list) / sizeof(range_types_list[0]));
-    attr.value.s32list.list = range_types_list;
-    table_attrs.push_back(attr);
-
-    status = sai_acl_api->create_acl_table(&table_oid, gSwitchId, (uint32_t)table_attrs.size(), table_attrs.data());
-
-    if (status == SAI_STATUS_SUCCESS)
-    {
-        if ((status = bindAclTable(table_oid, aclTable)) != SAI_STATUS_SUCCESS)
-        {
-            SWSS_LOG_ERROR("Failed to bind table %s to ports", aclTable.description.c_str());
-        }
-    }
-
-    return status;
 }
 
 sai_status_t AclOrch::deleteUnbindAclTable(sai_object_id_t table_oid)
@@ -1684,55 +1759,29 @@ sai_status_t AclOrch::deleteUnbindAclTable(sai_object_id_t table_oid)
     return sai_acl_api->remove_acl_table(table_oid);
 }
 
-void AclOrch::collectCountersThread(AclOrch* pAclOrch)
+void AclOrch::doTask(SelectableTimer &timer)
 {
     SWSS_LOG_ENTER();
 
-    while(m_bCollectCounters)
+    for (auto& table_it : m_AclTables)
     {
-        unique_lock<mutex> lock(m_countersMutex);
+        vector<swss::FieldValueTuple> values;
 
-        chrono::duration<double, milli> timeToSleep;
-        auto  updStart = chrono::steady_clock::now();
-
-        for (auto table_it : pAclOrch->m_AclTables)
+        for (auto rule_it : table_it.second.rules)
         {
-            vector<swss::FieldValueTuple> values;
+            AclRuleCounters cnt = rule_it.second->getCounters();
 
-            for (auto rule_it : table_it.second.rules)
-            {
-                AclRuleCounters cnt = rule_it.second->getCounters();
+            swss::FieldValueTuple fvtp("Packets", to_string(cnt.packets));
+            values.push_back(fvtp);
+            swss::FieldValueTuple fvtb("Bytes", to_string(cnt.bytes));
+            values.push_back(fvtb);
 
-                swss::FieldValueTuple fvtp("Packets", to_string(cnt.packets));
-                values.push_back(fvtp);
-                swss::FieldValueTuple fvtb("Bytes", to_string(cnt.bytes));
-                values.push_back(fvtb);
-
-                AclOrch::getCountersTable().set(table_it.second.id + ":" + rule_it.second->getId(), values, "");
-            }
-            values.clear();
+            AclOrch::getCountersTable().set(table_it.second.id + ":" + rule_it.second->getId(), values, "");
         }
-
-        timeToSleep = chrono::seconds(COUNTERS_READ_INTERVAL) - (chrono::steady_clock::now() - updStart);
-        if (timeToSleep > chrono::seconds(0))
-        {
-            SWSS_LOG_DEBUG("ACL counters DB update thread: sleeping %dms", (int)timeToSleep.count());
-            m_sleepGuard.wait_for(lock, timeToSleep);
-        }
-        else
-        {
-            SWSS_LOG_WARN("ACL counters DB update time is greater than the configured update period");
-        }
+        values.clear();
     }
-
 }
 
-/*
- * FIXME:
- * port class bindAclTable was supposed to add port to ACL group, not
- * necessarily manage the ACL group and ACL table.
- * The code should be refactored.
- */
 sai_status_t AclOrch::bindAclTable(sai_object_id_t table_oid, AclTable &aclTable, bool bind)
 {
     SWSS_LOG_ENTER();
@@ -1756,41 +1805,11 @@ sai_status_t AclOrch::bindAclTable(sai_object_id_t table_oid, AclTable &aclTable
 
     if (bind)
     {
-        for (const auto& portOid : aclTable.ports)
-        {
-            Port port;
-            gPortsOrch->getPort(portOid, port);
-            assert(port.m_type == Port::PHY);
-
-            sai_object_id_t group_member_oid;
-            status = port.bindAclTable(group_member_oid, table_oid);
-            if (status != SAI_STATUS_SUCCESS) {
-                return status;
-            }
-            m_AclTableGroupMembers.emplace(table_oid, group_member_oid);
-        }
+        aclTable.bind();
     }
     else
     {
-	/*
-	 * FIXME: If all acl-table removed, ACL group table should be removed
-	 * This require code refactor. I,E, we should call port.unbingAcltable
-	 * to do the right thing
-	 * See comments at begining of port.cpp
-	 */
-        auto range = m_AclTableGroupMembers.equal_range(table_oid);
-        auto iter = range.first;
-        while (iter != range.second)
-        {
-            sai_object_id_t member = iter->second;
-            status = sai_acl_api->remove_acl_table_group_member(member);
-            if (status != SAI_STATUS_SUCCESS) {
-                SWSS_LOG_ERROR("Failed to unbind table %lu as member %lu from"
-                  "ACL table: %d", table_oid, member, status);
-                return status;
-            }
-            m_AclTableGroupMembers.erase(iter++);
-        }
+        aclTable.unbind();
     }
 
     return status;

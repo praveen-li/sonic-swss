@@ -3,6 +3,7 @@
 *.la
 *.lo
 *.o
+*.pyc
 
 # Packaging Files #
 ###################
@@ -43,6 +44,8 @@ deps/
 teamsyncd/teamsyncd
 fpmsyncd/fpmsyncd
 intfsyncd/intfsyncd
+cfgmgr/intfmgrd
+cfgmgr/vlanmgrd
 neighsyncd/neighsyncd
 portsyncd/portsyncd
 orchagent/orchagent

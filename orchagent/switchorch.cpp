@@ -15,7 +15,8 @@ const map<string, sai_switch_attr_t> switch_attribute_map =
     {"fdb_broadcast_miss_packet_action",    SAI_SWITCH_ATTR_FDB_BROADCAST_MISS_PACKET_ACTION},
     {"fdb_multicast_miss_packet_action",    SAI_SWITCH_ATTR_FDB_MULTICAST_MISS_PACKET_ACTION},
     {"ecmp_hash_seed",                      SAI_SWITCH_ATTR_ECMP_DEFAULT_HASH_SEED},
-    {"lag_hash_seed",                       SAI_SWITCH_ATTR_LAG_DEFAULT_HASH_SEED}
+    {"lag_hash_seed",                       SAI_SWITCH_ATTR_LAG_DEFAULT_HASH_SEED},
+    {"fdb_aging_time",                      SAI_SWITCH_ATTR_FDB_AGING_TIME}
 };
 
 const map<string, sai_packet_action_t> packet_action_map =
@@ -38,7 +39,6 @@ void SwitchOrch::doTask(Consumer &consumer)
     while (it != consumer.m_toSync.end())
     {
         auto t = it->second;
-
         auto op = kfvOp(t);
 
         if (op == SET_COMMAND)
@@ -77,6 +77,10 @@ void SwitchOrch::doTask(Consumer &consumer)
 
                     case SAI_SWITCH_ATTR_ECMP_DEFAULT_HASH_SEED:
                     case SAI_SWITCH_ATTR_LAG_DEFAULT_HASH_SEED:
+                        attr.value.u32 = to_uint<uint32_t>(value);
+                        break;
+
+                    case SAI_SWITCH_ATTR_FDB_AGING_TIME:
                         attr.value.u32 = to_uint<uint32_t>(value);
                         break;
 

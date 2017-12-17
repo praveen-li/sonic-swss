@@ -77,7 +77,6 @@ typedef enum
 typedef map<string, acl_table_type_t> acl_table_type_lookup_t;
 typedef map<string, sai_acl_entry_attr_t> acl_rule_attr_lookup_t;
 typedef map<string, sai_acl_ip_type_t> acl_ip_type_lookup_t;
-typedef vector<sai_object_id_t> ports_list_t;
 typedef tuple<sai_acl_range_type_t, int, int> acl_range_properties_t;
 
 class AclOrch;
@@ -222,14 +221,46 @@ protected:
     MirrorOrch *m_pMirrorOrch;
 };
 
-struct AclTable {
+class AclTable {
+    sai_object_id_t m_oid;
+public:
     string id;
     string description;
     acl_table_type_t type;
-    ports_list_t ports;
+    acl_stage_type_t stage;
+
+    // Map port oid to group member oid
+    std::map<sai_object_id_t, sai_object_id_t> ports;
     // Map rule name to rule data
     map<string, shared_ptr<AclRule>> rules;
-    AclTable(): type(ACL_TABLE_UNKNOWN) {}
+
+    AclTable()
+        : type(ACL_TABLE_UNKNOWN)
+        , m_oid(SAI_NULL_OBJECT_ID)
+        , stage(ACL_STAGE_INGRESS)
+    {}
+
+    sai_object_id_t getOid() { return m_oid; }
+    string getId() { return id; }
+    bool validate();
+    bool create();
+
+    // Bind the ACL table to a port which is alread linked
+    bool bind(sai_object_id_t portOid);
+    // Unbind the ACL table to a port which is alread linked
+    bool unbind(sai_object_id_t portOid);
+    // Bind the ACL table to all ports linked
+    bool bind();
+    // Unbind the ACL table to all ports linked
+    bool unbind();
+    // Link the ACL table with a port, for future bind or unbind
+    void link(sai_object_id_t portOid);
+    // Add or overwrite a rule into the ACL table
+    bool add(shared_ptr<AclRule> newRule);
+    // Remove a rule from the ACL table
+    bool remove(string rule_id);
+    // Remove all rules from the ACL table
+    bool clear();
 };
 
 template <class Iterable>
@@ -260,43 +291,40 @@ public:
     }
 
     // FIXME: Add getters for them? I'd better to add a common directory of orch objects and use it everywhere
-    PortsOrch *m_portOrch;
     MirrorOrch *m_mirrorOrch;
     NeighOrch *m_neighOrch;
     RouteOrch *m_routeOrch;
 
     bool addAclTable(AclTable &aclTable, string table_id);
     bool removeAclTable(string table_id);
-    bool addAclRule(shared_ptr<AclRule> aclRule, string table_id, string rule_id);
+    bool addAclRule(shared_ptr<AclRule> aclRule, string table_id);
     bool removeAclRule(string table_id, string rule_id);
 
 private:
     void doTask(Consumer &consumer);
     void doAclTableTask(Consumer &consumer);
     void doAclRuleTask(Consumer &consumer);
+    void doTask(SelectableTimer &timer);
 
     static void collectCountersThread(AclOrch *pAclOrch);
 
-    sai_status_t createBindAclTable(AclTable &aclTable, sai_object_id_t &table_oid);
+    bool createBindAclTable(AclTable &aclTable, sai_object_id_t &table_oid);
     sai_status_t bindAclTable(sai_object_id_t table_oid, AclTable &aclTable, bool bind = true);
     sai_status_t deleteUnbindAclTable(sai_object_id_t table_oid);
 
     bool processAclTableType(string type, acl_table_type_t &table_type);
-    bool processPorts(string portsList, ports_list_t& out);
+    bool processAclTableStage(string stage, acl_stage_type_t &acl_stage);
+    bool processPorts(string portsList, std::function<void (sai_object_id_t)> inserter);
     bool validateAclTable(AclTable &aclTable);
 
     //vector <AclTable> m_AclTables;
     map <sai_object_id_t, AclTable> m_AclTables;
-    // ACL table OID to multiple ACL table group member
-    multimap <sai_object_id_t, sai_object_id_t> m_AclTableGroupMembers;
 
     static mutex m_countersMutex;
     static condition_variable m_sleepGuard;
     static bool m_bCollectCounters;
     static swss::DBConnector m_db;
     static swss::Table m_countersTable;
-
-    thread m_countersThread;
 };
 
 #endif /* SWSS_ACLORCH_H */

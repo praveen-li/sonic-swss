@@ -11,6 +11,7 @@ using namespace swss;
 
 /* select() function timeout retry time */
 #define SELECT_TIMEOUT 1000
+#define FLEX_COUNTER_POLL_MSECS 100
 
 extern sai_switch_api_t*           sai_switch_api;
 extern sai_object_id_t             gSwitchId;
@@ -22,6 +23,8 @@ PortsOrch *gPortsOrch;
 FdbOrch *gFdbOrch;
 NeighOrch *gNeighOrch;
 RouteOrch *gRouteOrch;
+/*Global variable gAclOrch declared*/
+AclOrch *gAclOrch;
 
 OrchDaemon::OrchDaemon(DBConnector *applDb, DBConnector *configDb) :
         m_applDb(applDb),
@@ -66,17 +69,17 @@ bool OrchDaemon::init()
     TunnelDecapOrch *tunnel_decap_orch = new TunnelDecapOrch(m_applDb, APP_TUNNEL_DECAP_TABLE_NAME);
 
     vector<string> qos_tables = {
-        APP_TC_TO_QUEUE_MAP_TABLE_NAME,
-        APP_SCHEDULER_TABLE_NAME,
-        APP_DSCP_TO_TC_MAP_TABLE_NAME,
-        APP_QUEUE_TABLE_NAME,
-        APP_PORT_QOS_MAP_TABLE_NAME,
-        APP_WRED_PROFILE_TABLE_NAME,
-        APP_TC_TO_PRIORITY_GROUP_MAP_NAME,
-        APP_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP_NAME,
-        APP_PFC_PRIORITY_TO_QUEUE_MAP_NAME
+        CFG_TC_TO_QUEUE_MAP_TABLE_NAME,
+        CFG_SCHEDULER_TABLE_NAME,
+        CFG_DSCP_TO_TC_MAP_TABLE_NAME,
+        CFG_QUEUE_TABLE_NAME,
+        CFG_PORT_QOS_MAP_TABLE_NAME,
+        CFG_WRED_PROFILE_TABLE_NAME,
+        CFG_TC_TO_PRIORITY_GROUP_MAP_TABLE_NAME,
+        CFG_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP_TABLE_NAME,
+        CFG_PFC_PRIORITY_TO_QUEUE_MAP_TABLE_NAME
     };
-    QosOrch *qos_orch = new QosOrch(m_applDb, qos_tables);
+    QosOrch *qos_orch = new QosOrch(m_configDb, qos_tables);
 
     vector<string> buffer_tables = {
         APP_BUFFER_POOL_TABLE_NAME,
@@ -96,9 +99,9 @@ bool OrchDaemon::init()
         CFG_ACL_TABLE_NAME,
         CFG_ACL_RULE_TABLE_NAME
     };
-    AclOrch *acl_orch = new AclOrch(m_configDb, acl_tables, gPortsOrch, mirror_orch, gNeighOrch, gRouteOrch);
+    gAclOrch = new AclOrch(m_configDb, acl_tables, gPortsOrch, mirror_orch, gNeighOrch, gRouteOrch);
 
-    m_orchList = { switch_orch, gPortsOrch, intfs_orch, gNeighOrch, gRouteOrch, copp_orch, tunnel_decap_orch, qos_orch, buffer_orch, mirror_orch, acl_orch, gFdbOrch};
+    m_orchList = { switch_orch, gPortsOrch, intfs_orch, gNeighOrch, gRouteOrch, copp_orch, tunnel_decap_orch, qos_orch, buffer_orch, mirror_orch, gAclOrch, gFdbOrch};
     m_select = new Select();
 
     vector<string> pfc_wd_tables = {
@@ -137,11 +140,12 @@ bool OrchDaemon::init()
         static const vector<sai_queue_attr_t> queueAttrIds;
 
         m_orchList.push_back(new PfcWdSwOrch<PfcWdZeroBufferHandler, PfcWdLossyHandler>(
-                    m_applDb,
+                    m_configDb,
                     pfc_wd_tables,
                     portStatIds,
                     queueStatIds,
-                    queueAttrIds));
+                    queueAttrIds,
+                    FLEX_COUNTER_POLL_MSECS));
     }
     else if (platform == BRCM_PLATFORM_SUBSTRING)
     {
@@ -176,12 +180,13 @@ bool OrchDaemon::init()
             SAI_QUEUE_ATTR_PAUSE_STATUS,
         };
 
-        m_orchList.push_back(new PfcWdSwOrch<PfcWdActionHandler, PfcWdActionHandler>(
-                    m_applDb,
+        m_orchList.push_back(new PfcWdSwOrch<PfcWdAclHandler, PfcWdLossyHandler>(
+                    m_configDb,
                     pfc_wd_tables,
                     portStatIds,
                     queueStatIds,
-                    queueAttrIds));
+                    queueAttrIds,
+                    FLEX_COUNTER_POLL_MSECS));
     }
 
     return true;
@@ -235,9 +240,8 @@ void OrchDaemon::start()
             continue;
         }
 
-        TableConsumable *c = (TableConsumable *)s;
-        Orch *o = getOrchByConsumer(c);
-        o->execute(c->getTableName());
+        auto *c = (Executor *)s;
+        c->execute();
 
         /* After each iteration, periodically check all m_toSync map to
          * execute all the remaining tasks that need to be retried. */
@@ -247,20 +251,4 @@ void OrchDaemon::start()
             o->doTask();
 
     }
-}
-
-Orch *OrchDaemon::getOrchByConsumer(TableConsumable *c)
-{
-    SWSS_LOG_ENTER();
-
-    for (Orch *o : m_orchList)
-    {
-        if (o->hasSelectable(c))
-            return o;
-    }
-
-    SWSS_LOG_ERROR("Failed to get Orch class by ConsumerTable:%s",
-            c->getTableName().c_str());
-
-    return nullptr;
 }
