@@ -88,7 +88,6 @@ AC_CONFIG_FILES([
     swssconfig/Makefile
     tests/Makefile
     cfgagent/Makefile
-    cfgagent/cfgmgrtest/Makefile
 ])
 
 AC_OUTPUT
