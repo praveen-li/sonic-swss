@@ -12,8 +12,6 @@
 #include "cfgmgr.h"
 #include "vlancfgmgr.h"
 
-#include "../../orchagent/orchbase.h"
-
 using namespace std;
 using namespace swss;
 

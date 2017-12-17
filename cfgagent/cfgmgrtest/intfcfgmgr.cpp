@@ -12,8 +12,6 @@
 #include "cfgmgr.h"
 #include "intfcfgmgr.h"
 
-#include "../../orchagent/orchbase.h"
-
 using namespace std;
 using namespace swss;
 
