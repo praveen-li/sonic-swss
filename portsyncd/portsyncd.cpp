@@ -304,32 +304,3 @@ void handlePortConfig(ProducerStateTable &p, map<string, KeyOpFieldsValuesTuple>
         }
     }
 }
-
-void handlePortConfig(ProducerStateTable &p, map<string, KeyOpFieldsValuesTuple> &port_cfg_map)
-{
-
-    auto it = port_cfg_map.begin();
-    while (it != port_cfg_map.end())
-    {
-        KeyOpFieldsValuesTuple entry = it->second;
-        string key = kfvKey(entry);
-        string op  = kfvOp(entry);
-        auto values = kfvFieldsValues(entry);
-
-        /* only push down port config when port is not in hostif create pending state */
-        if (g_portSet.find(key) == g_portSet.end())
-        {
-            /* No support for port delete yet */
-            if (op == SET_COMMAND)
-            {
-                p.set(key, values);
-            }
-
-            it = port_cfg_map.erase(it);
-        }
-        else
-        {
-            it++;
-        }
-    }
-}

@@ -198,8 +198,15 @@ public:
     bool validateAddMatch(string attr_name, string attr_value);
     bool validate();
     void update(SubjectType, void *);
-private:
+protected:
     sai_object_id_t getRedirectObjectId(const string& redirect_param);
+};
+
+class AclRuleL3V6: public AclRuleL3
+{
+public:
+    AclRuleL3V6(AclOrch *m_pAclOrch, string rule, string table, acl_table_type_t type);
+    bool validateAddMatch(string attr_name, string attr_value);
 };
 
 class AclRuleMirror: public AclRule
