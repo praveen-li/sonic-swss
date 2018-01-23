@@ -68,7 +68,17 @@ void IntfsOrch::doTask(Consumer &consumer)
         string alias(keys[0]);
         IpPrefix ip_prefix(kfvKey(t).substr(kfvKey(t).find(':')+1));
 
-        if (alias == "eth0" || alias == "docker0")
+        string scope;
+        for (auto i : kfvFieldsValues(t))
+        {
+            if (fvField(i) == "scope")
+            {
+                scope = (fvValue(i));
+                break;
+            }
+        }
+
+        if (alias == "eth0" || alias == "docker0" || alias == "Bridge")
         {
             it = consumer.m_toSync.erase(it);
             continue;
@@ -79,7 +89,10 @@ void IntfsOrch::doTask(Consumer &consumer)
         {
             if (alias == "lo")
             {
-                addIp2MeRoute(ip_prefix);
+                createIntfRoutes(IntfRouteEntry(ip_prefix, alias),
+                                 Port(alias, Port::LOOPBACK));
+
+                m_syncdIntfses[alias] = IntfsEntry();
                 it = consumer.m_toSync.erase(it);
                 continue;
             }
@@ -88,6 +101,11 @@ void IntfsOrch::doTask(Consumer &consumer)
             if (!gPortsOrch->getPort(alias, port))
             {
                 /* TODO: Resolve the dependency relationship and add ref_count to port */
+
+                SWSS_LOG_NOTICE("Missing port associated to ip-address %s being "
+                                "added on interface %s ",
+                                ip_prefix.to_string().c_str(),
+                                alias.c_str());
                 it++;
                 continue;
             }
@@ -95,11 +113,13 @@ void IntfsOrch::doTask(Consumer &consumer)
             auto it_intfs = m_syncdIntfses.find(alias);
             if (it_intfs == m_syncdIntfses.end())
             {
-                if (addRouterIntfs(port))
+                /*
+                 * New routerIntfs will be created only when at least one global-
+                 * scoped address is defined within the interface.
+                 */
+                if (scope == "global" && addRouterIntfs(port))
                 {
-                    IntfsEntry intfs_entry;
-                    intfs_entry.ref_count = 0;
-                    m_syncdIntfses[alias] = intfs_entry;
+                    m_syncdIntfses[alias] = IntfsEntry();
                 }
                 else
                 {
@@ -143,8 +163,8 @@ void IntfsOrch::doTask(Consumer &consumer)
                 continue;
             }
 
-            addSubnetRoute(port, ip_prefix);
-            addIp2MeRoute(ip_prefix);
+            /* Creating intfRoutes associated to this interface being added */
+            createIntfRoutes(IntfRouteEntry(ip_prefix, alias), port);
 
             m_syncdIntfses[alias].ip_addresses.insert(ip_prefix);
             it = consumer.m_toSync.erase(it);
@@ -153,7 +173,8 @@ void IntfsOrch::doTask(Consumer &consumer)
         {
             if (alias == "lo")
             {
-                removeIp2MeRoute(ip_prefix);
+                deleteIntfRoutes(IntfRouteEntry(ip_prefix, alias),
+                                 Port(alias, Port::LOOPBACK));
                 it = consumer.m_toSync.erase(it);
                 continue;
             }
@@ -162,22 +183,28 @@ void IntfsOrch::doTask(Consumer &consumer)
             /* Cannot locate interface */
             if (!gPortsOrch->getPort(alias, port))
             {
+                SWSS_LOG_NOTICE("Missing port associated to ip-address %s being "
+                                "deleted on interface %s ",
+                                ip_prefix.to_string().c_str(),
+                                alias.c_str());
+
                 it = consumer.m_toSync.erase(it);
                 continue;
             }
 
-            if (m_syncdIntfses.find(alias) != m_syncdIntfses.end())
-            {
-                if (m_syncdIntfses[alias].ip_addresses.count(ip_prefix))
-                {
-                    removeSubnetRoute(port, ip_prefix);
-                    removeIp2MeRoute(ip_prefix);
+            /* Deleting intfRoutes associated to this intf being removed */
+            deleteIntfRoutes(IntfRouteEntry(ip_prefix, alias), port);
 
-                    m_syncdIntfses[alias].ip_addresses.erase(ip_prefix);
+            auto iter = m_syncdIntfses.find(alias);
+            if (iter != m_syncdIntfses.end())
+            {
+                if (iter->second.ip_addresses.count(ip_prefix))
+                {
+                    iter->second.ip_addresses.erase(ip_prefix);
                 }
 
-                /* Remove router interface that no IP addresses are associated with */
-                if (m_syncdIntfses[alias].ip_addresses.size() == 0)
+                 /* Remove router interface if there's no ip-address left. */
+                if (iter->second.ip_addresses.size() == 0)
                 {
                     if (removeRouterIntfs(port))
                     {
@@ -193,8 +220,10 @@ void IntfsOrch::doTask(Consumer &consumer)
                 }
             }
             else
+            {
                 /* Cannot locate the interface */
                 it = consumer.m_toSync.erase(it);
+            }
         }
     }
 }
@@ -401,4 +430,274 @@ void IntfsOrch::removeIp2MeRoute(const IpPrefix &ip_prefix)
     }
 
     SWSS_LOG_NOTICE("Remove packet action trap route ip:%s", ip_prefix.getIp().to_string().c_str());
+}
+
+void IntfsOrch::createIntfRoutes(const IntfRouteEntry &ifRoute,
+                                 const Port           &port)
+{
+    SWSS_LOG_ENTER();
+
+    /*
+     * Each newly create interface requires the insertion of two routes in the
+     * system: a subnet route and an ip2me one.
+     */
+    IntfRouteEntry ifSubnetRoute(ifRoute.prefix.getSubnet(),
+                                 ifRoute.ifName,
+                                 "subnet");
+    IntfRouteEntry ifIp2meRoute(getIp2mePrefix(ifRoute.prefix),
+                                ifRoute.ifName,
+                                "ip2me");
+
+    /*
+     * There are two scenarios in which we want to skip the addition of an
+     * interface-subnet route:
+     *
+     * - When dealing with a full-mask interface address (i.e /32 or /128)
+     * - When the port associated to the interface is declared as LOOPBACK
+     */
+    bool subnetOverlap = false, ip2meOverlap = false, skipSubnet = false;
+
+    if (ifSubnetRoute == ifIp2meRoute || port.m_type == Port::LOOPBACK)
+    {
+        skipSubnet = true;
+    }
+
+    if (!skipSubnet)
+    {
+        subnetOverlap = trackIntfRouteOverlap(ifSubnetRoute);
+    }
+    ip2meOverlap = trackIntfRouteOverlap(ifIp2meRoute);
+
+    /* Based on above results, proceed to create routes identified as unique. */
+    if (subnetOverlap)
+    {
+        if (!ip2meOverlap)
+        {
+            addIp2MeRoute(ifIp2meRoute.prefix);
+        }
+    }
+    else /* !subnetOverlap */
+    {
+        if (!skipSubnet)
+        {
+            if (!ip2meOverlap)
+            {
+                addSubnetRoute(port, ifSubnetRoute.prefix);
+                addIp2MeRoute(ifIp2meRoute.prefix);
+            }
+            else
+            {
+                addSubnetRoute(port, ifSubnetRoute.prefix);
+            }
+        }
+        else
+        {
+            if (!ip2meOverlap)
+            {
+                addIp2MeRoute(ifIp2meRoute.prefix);
+            }
+        }
+    }
+}
+
+/*
+ * Method's goal is to track/record any potential overlap between the interfaces
+ * configured in the system, and alert caller of such an incident.
+ */
+bool IntfsOrch::trackIntfRouteOverlap(const IntfRouteEntry &ifRoute)
+{
+    SWSS_LOG_ENTER();
+
+    string ifRouteStr = ifRoute.prefix.to_string();
+
+    auto iterIfRoute = m_intfRoutes.find(ifRouteStr);
+    if (iterIfRoute == m_intfRoutes.end())
+    {
+        m_intfRoutes[ifRouteStr].push_back(ifRoute);
+        return false;
+    }
+
+    auto listIfRoutes = iterIfRoute->second;
+
+    for (auto &curIfRoute : listIfRoutes)
+    {
+        if (curIfRoute.prefix == ifRoute.prefix)
+        {
+            SWSS_LOG_ERROR("New %s route %s for interface %s overlaps with "
+                           "existing route %s for interface %s. "
+                           "Skipping...",
+                           ifRoute.type.c_str(),
+                           ifRouteStr.c_str(),
+                           ifRoute.ifName.c_str(),
+                           curIfRoute.prefix.to_string().c_str(),
+                           curIfRoute.ifName.c_str());
+
+            iterIfRoute->second.push_back(ifRoute);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void IntfsOrch::deleteIntfRoutes(const IntfRouteEntry &ifRoute,
+                                 const Port           &port)
+{
+    SWSS_LOG_ENTER();
+
+    IntfRouteEntry ifSubnetRoute(ifRoute.prefix.getSubnet(),
+                                 ifRoute.ifName,
+                                 "subnet");
+    IntfRouteEntry ifIp2meRoute(getIp2mePrefix(ifRoute.prefix),
+                                ifRoute.ifName,
+                                "ip2me");
+
+    /*
+     * As we did for route creation case, we will skip the deletion of the subnet
+     * route in two scenarios:
+     *
+     * - When dealing with a full-mask interface address (i.e /32 or /128)
+     * - When the port associated to the interface is declared as LOOPBACK
+     */
+    bool skipSubnet = false;
+    if (ifSubnetRoute == ifIp2meRoute || port.m_type == Port::LOOPBACK)
+    {
+        skipSubnet = true;
+    }
+
+    if (!skipSubnet)
+    {
+        deleteIntfRoute(ifSubnetRoute, port);
+    }
+    deleteIntfRoute(ifIp2meRoute, port);
+}
+
+void IntfsOrch::deleteIntfRoute(const IntfRouteEntry &ifRoute, const Port &port)
+{
+    SWSS_LOG_ENTER();
+
+    string ifRouteStr = ifRoute.prefix.to_string();
+
+    /* Return if there's no matching ifRoute in the map */
+    if (!m_intfRoutes.count(ifRouteStr))
+    {
+        return;
+    }
+
+    /*
+     * Obtain the list of routeEntries associated to this ifRoute, and iterate
+     * through it looking for the matching entry (x) to eliminate. We are dealing
+     * with two cases here:
+     *
+     * 1) If (x) is at the front of the list, then (x) is the 'active' route,
+     * meaning the one that got pushed down to hw. In this case we will need to
+     * 'resurrect' other (if any) overlapping routeEntry.
+     *
+     * 2) If (x) is at any other position in the list, then we will simply
+     * eliminate it from the global hashmap, as there's no notion of this route
+     * anywhere else.
+     */
+    auto list = m_intfRoutes[ifRouteStr];
+
+    for (auto it = list.begin(); it != list.end(); ++it)
+    {
+        if (it->ifName == ifRoute.ifName)
+        {
+            /* Case 1) */
+            if (it == list.begin())
+            {
+                SWSS_LOG_NOTICE("Eliminating active %s route %s from "
+                                "interface %s",
+                                it->type.c_str(),
+                                it->prefix.to_string().c_str(),
+                                it->ifName.c_str());
+
+                if (it->type == "subnet")
+                {
+                    removeSubnetRoute(port, ifRoute.prefix);
+                }
+                else if (it->type == "ip2me")
+                {
+                    removeIp2MeRoute(ifRoute.prefix);
+                }
+
+                /*
+                 * Notice that the resurrection-order is vital here. We must
+                 * necessarily pick the oldest entry in the list (next element),
+                 * in order to keep full consistency with kernel's tie-breaking
+                 * logic.
+                 */
+                auto itNext = next(it);
+                if (itNext != list.end())
+                {
+                    resurrectIntfRoute(*itNext);
+                }
+                list.pop_front();
+            }
+            /* Case 2) */
+            else
+            {
+                SWSS_LOG_NOTICE("Eliminating overlapped %s route %s from "
+                                "interface %s",
+                                it->type.c_str(),
+                                it->prefix.to_string().c_str(),
+                                it->ifName.c_str());
+                list.erase(it);
+            }
+
+            m_intfRoutes[ifRouteStr] = list;
+
+            if (!list.size())
+            {
+                m_intfRoutes.erase(ifRouteStr);
+            }
+
+            break;
+        }
+    }
+}
+
+void IntfsOrch::resurrectIntfRoute(const IntfRouteEntry &ifRoute)
+{
+    SWSS_LOG_ENTER();
+
+    /* Obtain intf's associated port */
+    Port port;
+    if (!gPortsOrch->getPort(ifRoute.ifName, port))
+    {
+        SWSS_LOG_NOTICE("Missing port associated to ip-address %s being "
+                        "resurrected on interface %s ",
+                        ifRoute.prefix.to_string().c_str(),
+                        ifRoute.ifName.c_str());
+        return;
+    }
+
+    SWSS_LOG_NOTICE("Resurrecting overlapped %s route %s from interface %s ",
+                    ifRoute.type.c_str(),
+                    ifRoute.prefix.to_string().c_str(),
+                    ifRoute.ifName.c_str());
+
+
+    /* Kicking off resurrection process */
+    if (ifRoute.type == "subnet")
+    {
+        addSubnetRoute(port, ifRoute.prefix);
+        m_syncdIntfses[ifRoute.ifName].ip_addresses.insert(ifRoute.prefix);
+    }
+    else if (ifRoute.type == "ip2me")
+    {
+        addIp2MeRoute(ifRoute.prefix);
+    }
+}
+
+/*
+ * Perhaps to be moved to a more appropriate location (e.g. IpPrefix class).
+ */
+IpPrefix IntfsOrch::getIp2mePrefix(const IpPrefix &ip_prefix)
+{
+    string newRoutePrefixStr = ip_prefix.isV4() ?
+        ip_prefix.getIp().to_string() + "/32" :
+        ip_prefix.getIp().to_string() + "/128";
+
+    return (IpPrefix(newRoutePrefixStr));
 }
