@@ -71,13 +71,9 @@ typedef enum
 {
     ACL_TABLE_UNKNOWN,
     ACL_TABLE_L3,
-<<<<<<< HEAD
     ACL_TABLE_L3V6,
-    ACL_TABLE_MIRROR
-=======
     ACL_TABLE_MIRROR,
     ACL_TABLE_CTRLPLANE
->>>>>>> github
 } acl_table_type_t;
 
 typedef map<string, acl_table_type_t> acl_table_type_lookup_t;
