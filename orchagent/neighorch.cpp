@@ -273,6 +273,18 @@ void NeighOrch::doTask(Consumer &consumer)
 
         IpAddress ip_address(key.substr(found+1));
 
+        /* In link-local on vlan case, we don't add/remove neighbor entries */
+        string neighborIpSubstr = ip_address.to_string().substr(0, 5);
+        if (p.m_type == Port::VLAN && (neighborIpSubstr == "fe80:" || neighborIpSubstr == "FE80:"))
+        {
+            SWSS_LOG_DEBUG("Skipping adding/removing neighbor entries for IPv6 local-scope "
+	        "neighbor %s on intf %s",
+	        ip_address.to_string().c_str(),
+	        alias.c_str());
+            it = consumer.m_toSync.erase(it);
+            continue;
+	}
+
         NeighborEntry neighbor_entry = { ip_address, alias };
 
         string op = kfvOp(t);
