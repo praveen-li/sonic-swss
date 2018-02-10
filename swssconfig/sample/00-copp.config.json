@@ -1,18 +1,7 @@
 [
     {
-        "COPP_TABLE:default": {
-            "queue": "0",
-            "meter_type":"packets",
-            "mode":"sr_tcm",
-            "cir":"600",
-            "cbs":"600",
-            "red_action":"drop"
-        },
-        "OP": "SET"
-    },
-    {
-        "COPP_TABLE:trap.group.bgp.lacp": {
-            "trap_ids": "bgp,bgpv6,lacp",
+        "COPP_TABLE:trap.group.bgp.lldp": {
+            "trap_ids": "bgp,bgpv6,lldp",
             "trap_action":"trap",
             "trap_priority":"4",
             "queue": "4"
@@ -20,8 +9,8 @@
         "OP": "SET"
     },
     {
-        "COPP_TABLE:trap.group.arp": {
-            "trap_ids": "arp_req,arp_resp,neigh_discovery",
+        "COPP_TABLE:trap.group.arp.dhcp": {
+            "trap_ids": "arp_req,arp_resp,neigh_discovery,dhcp,dhcpv6",
             "trap_action":"trap",
             "trap_priority":"4",
             "queue": "4",
@@ -34,20 +23,22 @@
         "OP": "SET"
     },
     {
-        "COPP_TABLE:trap.group.lldp.dhcp": {
-            "trap_ids": "lldp,dhcp",
-            "trap_action":"trap",
-            "trap_priority":"4",
-            "queue": "4"
-        },
-        "OP": "SET"
-    },
-    {
         "COPP_TABLE:trap.group.ip2me": {
             "trap_ids": "ip2me",
             "trap_action":"trap",
             "trap_priority":"1",
             "queue": "1",
+            "meter_type":"packets",
+            "mode":"sr_tcm",
+            "cir":"3000",
+            "cbs":"3000",
+            "red_action":"drop"
+        },
+        "OP": "SET"
+    },
+    {
+        "COPP_TABLE:default": {
+            "queue": "0",
             "meter_type":"packets",
             "mode":"sr_tcm",
             "cir":"600",
