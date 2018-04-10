@@ -1007,6 +1007,7 @@ void PortsOrch::doPortTask(Consumer &consumer)
         if (alias == "PortConfigDone")
         {
             m_portConfigDone = true;
+            SWSS_LOG_NOTICE("Port configuration done.");
 
             for (auto i : kfvFieldsValues(t))
             {
@@ -1163,9 +1164,12 @@ void PortsOrch::doPortTask(Consumer &consumer)
             }
 
             Port p;
-            if (!getPort(alias, p))
+            if (alias == "PortConfigDone" || !getPort(alias, p))
             {
-                SWSS_LOG_ERROR("Failed to get port id by alias:%s", alias.c_str());
+                if (alias != "PortConfigDone")
+                {
+                    SWSS_LOG_ERROR("Failed to get port id by alias:%s", alias.c_str());
+                }
             }
             else
             {
