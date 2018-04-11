@@ -12,7 +12,6 @@ extern PortsOrch *gPortsOrch;
 extern RouteOrch *gRouteOrch;
 extern sai_object_id_t gSwitchId;
 extern CrmOrch *gCrmOrch;
-extern RouteOrch *gRouteOrch;
 
 NeighOrch::NeighOrch(DBConnector *db, string tableName, IntfsOrch *intfsOrch) :
         Orch(db, tableName), m_intfsOrch(intfsOrch)
