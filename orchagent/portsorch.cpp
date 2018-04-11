@@ -894,7 +894,7 @@ bool PortsOrch::setHostIntfsOperStatus(sai_object_id_t port_id, bool up)
         }
         return true;
     }
-    return (false);
+    return false;
 }
 
 void PortsOrch::updateDbPortOperStatus(sai_object_id_t id, sai_port_oper_status_t status)
