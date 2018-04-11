@@ -12,6 +12,7 @@ using namespace swss;
 
 /* select() function timeout retry time */
 #define SELECT_TIMEOUT 1000
+#define PFC_WD_POLL_MSECS 100
 
 extern sai_switch_api_t*           sai_switch_api;
 extern sai_object_id_t             gSwitchId;
@@ -23,13 +24,12 @@ PortsOrch *gPortsOrch;
 FdbOrch *gFdbOrch;
 NeighOrch *gNeighOrch;
 RouteOrch *gRouteOrch;
-/*Global variable gAclOrch declared*/
 AclOrch *gAclOrch;
+CrmOrch *gCrmOrch;
 
 OrchDaemon::OrchDaemon(DBConnector *applDb, DBConnector *configDb) :
         m_applDb(applDb),
         m_configDb(configDb)
-
 {
     SWSS_LOG_ENTER();
 }
@@ -60,6 +60,7 @@ bool OrchDaemon::init()
         APP_LAG_MEMBER_TABLE_NAME
     };
 
+    gCrmOrch = new CrmOrch(m_configDb, CFG_CRM_TABLE_NAME);
     gPortsOrch = new PortsOrch(m_applDb, ports_tables);
     gFdbOrch = new FdbOrch(m_applDb, APP_FDB_TABLE_NAME, gPortsOrch);
     IntfsOrch *intfs_orch = new IntfsOrch(m_applDb, APP_INTF_TABLE_NAME);
@@ -82,14 +83,14 @@ bool OrchDaemon::init()
     QosOrch *qos_orch = new QosOrch(m_configDb, qos_tables);
 
     vector<string> buffer_tables = {
-        APP_BUFFER_POOL_TABLE_NAME,
-        APP_BUFFER_PROFILE_TABLE_NAME,
-        APP_BUFFER_QUEUE_TABLE_NAME,
-        APP_BUFFER_PG_TABLE_NAME,
-        APP_BUFFER_PORT_INGRESS_PROFILE_LIST_NAME,
-        APP_BUFFER_PORT_EGRESS_PROFILE_LIST_NAME
+        CFG_BUFFER_POOL_TABLE_NAME,
+        CFG_BUFFER_PROFILE_TABLE_NAME,
+        CFG_BUFFER_QUEUE_TABLE_NAME,
+        CFG_BUFFER_PG_TABLE_NAME,
+        CFG_BUFFER_PORT_INGRESS_PROFILE_LIST_NAME,
+        CFG_BUFFER_PORT_EGRESS_PROFILE_LIST_NAME
     };
-    BufferOrch *buffer_orch = new BufferOrch(m_applDb, buffer_tables);
+    BufferOrch *buffer_orch = new BufferOrch(m_configDb, buffer_tables);
 
     TableConnector appDbMirrorSession(m_applDb, APP_MIRROR_SESSION_TABLE_NAME);
     TableConnector confDbMirrorSession(m_configDb, CFG_MIRROR_SESSION_TABLE_NAME);
@@ -102,11 +103,11 @@ bool OrchDaemon::init()
     };
     gAclOrch = new AclOrch(m_configDb, acl_tables, gPortsOrch, mirror_orch, gNeighOrch, gRouteOrch);
 
-    m_orchList = { switch_orch, gPortsOrch, intfs_orch, gNeighOrch, gRouteOrch, copp_orch, tunnel_decap_orch, qos_orch, buffer_orch, mirror_orch, gAclOrch, gFdbOrch, vrf_orch };
+    m_orchList = { switch_orch, gCrmOrch, gPortsOrch, intfs_orch, gNeighOrch, gRouteOrch, copp_orch, tunnel_decap_orch, qos_orch, buffer_orch, mirror_orch, gAclOrch, gFdbOrch, vrf_orch };
     m_select = new Select();
 
     vector<string> pfc_wd_tables = {
-        APP_PFC_WD_TABLE_NAME
+        CFG_PFC_WD_TABLE_NAME
     };
 
     if (platform == MLNX_PLATFORM_SUBSTRING)
@@ -189,6 +190,8 @@ bool OrchDaemon::init()
                     queueAttrIds,
                     PFC_WD_POLL_MSECS));
     }
+
+    m_orchList.push_back(&CounterCheckOrch::getInstance(m_configDb));
 
     return true;
 }

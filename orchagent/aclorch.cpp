@@ -7,6 +7,7 @@
 #include "ipprefix.h"
 #include "converter.h"
 #include "timer.h"
+#include "crmorch.h"
 
 using namespace std;
 using namespace swss;
@@ -26,6 +27,7 @@ extern sai_port_api_t*   sai_port_api;
 extern sai_switch_api_t* sai_switch_api;
 extern sai_object_id_t   gSwitchId;
 extern PortsOrch*        gPortsOrch;
+extern CrmOrch *gCrmOrch;
 
 acl_rule_attr_lookup_t aclMatchLookup =
 {
@@ -379,6 +381,8 @@ bool AclRule::create()
         decreaseNextHopRefCount();
     }
 
+    gCrmOrch->incCrmAclTableUsedCounter(CrmResourceType::CRM_ACL_ENTRY, m_tableOid);
+
     return (status == SAI_STATUS_SUCCESS);
 }
 
@@ -422,6 +426,8 @@ bool AclRule::remove()
         SWSS_LOG_ERROR("Failed to delete ACL rule");
         return false;
     }
+
+    gCrmOrch->decCrmAclTableUsedCounter(CrmResourceType::CRM_ACL_ENTRY, m_tableOid);
 
     m_ruleOid = SAI_NULL_OBJECT_ID;
 
@@ -487,10 +493,10 @@ shared_ptr<AclRule> AclRule::makeShared(acl_table_type_t type, AclOrch *acl, Mir
     {
         return make_shared<AclRuleL3>(acl, rule, table, type);
     }
-	/* L3V6 rules can exist only in L3V6 table */
+    /* L3V6 rules can exist only in L3V6 table */
     else if (type == ACL_TABLE_L3V6)
     {
-	    return make_shared<AclRuleL3V6>(acl, rule, table, type);
+        return make_shared<AclRuleL3V6>(acl, rule, table, type);
     }
 
     throw runtime_error("Wrong combination of table type and action in rule " + rule);
@@ -520,6 +526,8 @@ bool AclRule::createCounter()
         SWSS_LOG_ERROR("Failed to create counter for the rule %s in table %s", m_id.c_str(), m_tableId.c_str());
         return false;
     }
+
+    gCrmOrch->incCrmAclTableUsedCounter(CrmResourceType::CRM_ACL_COUNTER, m_tableOid);
 
     return true;
 }
@@ -552,6 +560,8 @@ bool AclRule::removeCounter()
         SWSS_LOG_ERROR("Failed to remove ACL counter for rule %s in table %s", m_id.c_str(), m_tableId.c_str());
         return false;
     }
+
+    gCrmOrch->decCrmAclTableUsedCounter(CrmResourceType::CRM_ACL_COUNTER, m_tableOid);
 
     SWSS_LOG_INFO("Removing record about the counter %lX from the DB", m_counterOid);
     AclOrch::getCountersTable().del(getTableId() + ":" + getId());
@@ -973,7 +983,8 @@ bool AclTable::create()
     attr.value.booldata = true;
     table_attrs.push_back(attr);
 
-    if (type == ACL_TABLE_L3V6) {
+    if (type == ACL_TABLE_L3V6)
+    {
         attr.id = SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6;
         attr.value.booldata = true;
         table_attrs.push_back(attr);
@@ -1028,6 +1039,12 @@ bool AclTable::create()
     }
 
     sai_status_t status = sai_acl_api->create_acl_table(&m_oid, gSwitchId, (uint32_t)table_attrs.size(), table_attrs.data());
+
+    if (status == SAI_STATUS_SUCCESS)
+    {
+        gCrmOrch->incCrmAclUsedCounter(CrmResourceType::CRM_ACL_TABLE, (sai_acl_stage_t) attr.value.s32, SAI_ACL_BIND_POINT_TYPE_PORT);
+    }
+
     return status == SAI_STATUS_SUCCESS;
 }
 
@@ -1443,6 +1460,10 @@ bool AclOrch::removeAclTable(string table_id)
     {
         SWSS_LOG_NOTICE("Successfully deleted ACL table %s", table_id.c_str());
         m_AclTables.erase(table_oid);
+
+        sai_acl_stage_t stage = (m_AclTables[table_oid].stage == ACL_STAGE_INGRESS) ? SAI_ACL_STAGE_INGRESS : SAI_ACL_STAGE_EGRESS;
+        gCrmOrch->decCrmAclUsedCounter(CrmResourceType::CRM_ACL_TABLE, stage, SAI_ACL_BIND_POINT_TYPE_PORT, table_oid);
+
         return true;
     }
     else

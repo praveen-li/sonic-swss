@@ -2,6 +2,7 @@
 #include "routeorch.h"
 #include "logger.h"
 #include "swssnet.h"
+#include "crmorch.h"
 
 extern sai_object_id_t gVirtualRouterId;
 extern sai_object_id_t gSwitchId;
@@ -11,6 +12,7 @@ extern sai_route_api_t*             sai_route_api;
 extern sai_switch_api_t*            sai_switch_api;
 
 extern PortsOrch *gPortsOrch;
+extern CrmOrch *gCrmOrch;
 
 /* Default maximum number of next hop groups */
 #define DEFAULT_NUMBER_OF_ECMP_GROUPS   128
@@ -73,6 +75,8 @@ RouteOrch::RouteOrch(DBConnector *db, string tableName, NeighOrch *neighOrch) :
         throw runtime_error("Failed to create IPv4 default route with packet action drop");
     }
 
+    gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV4_ROUTE);
+
     /* Add default IPv4 route into the m_syncdRoutes */
     m_syncdRoutes[default_ip_prefix] = IpAddresses();
 
@@ -89,6 +93,8 @@ RouteOrch::RouteOrch(DBConnector *db, string tableName, NeighOrch *neighOrch) :
         SWSS_LOG_ERROR("Failed to create IPv6 default route with packet action drop");
         throw runtime_error("Failed to create IPv6 default route with packet action drop");
     }
+
+    gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV6_ROUTE);
 
     /* Add default IPv6 route into the m_syncdRoutes */
     m_syncdRoutes[v6_default_ip_prefix] = IpAddresses();
@@ -168,9 +174,11 @@ bool RouteOrch::validnexthopinNextHopGroup(const IpAddress &ipaddr)
     sai_status_t status;
 
     for (auto nhopgroup = m_syncdNextHopGroups.begin();
-         nhopgroup != m_syncdNextHopGroups.end(); ++nhopgroup) {
+         nhopgroup != m_syncdNextHopGroups.end(); ++nhopgroup)
+    {
 
-        if (!(nhopgroup->first.contains(ipaddr))) {
+        if (!(nhopgroup->first.contains(ipaddr)))
+        {
             continue;
         }
 
@@ -189,15 +197,18 @@ bool RouteOrch::validnexthopinNextHopGroup(const IpAddress &ipaddr)
                                                                       (uint32_t)nhgm_attrs.size(),
                                                                       nhgm_attrs.data());
 
-        if (status != SAI_STATUS_SUCCESS) {
+        if (status != SAI_STATUS_SUCCESS)
+        {
             SWSS_LOG_ERROR("Failed to add next hop member to group %lx: %d\n",
                            nhopgroup->second.next_hop_group_id, status);
-            return (false);
+            return false;
         }
+
+        gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP_MEMBER);
         nhopgroup->second.nhopgroup_members[ipaddr] = nexthop_id;
     }
 
-    return (true);
+    return true;
 }
 
 bool RouteOrch::invalidnexthopinNextHopGroup(const IpAddress &ipaddr)
@@ -208,23 +219,28 @@ bool RouteOrch::invalidnexthopinNextHopGroup(const IpAddress &ipaddr)
     sai_status_t status;
 
     for (auto nhopgroup = m_syncdNextHopGroups.begin();
-         nhopgroup != m_syncdNextHopGroups.end(); ++nhopgroup) {
+         nhopgroup != m_syncdNextHopGroups.end(); ++nhopgroup)
+    {
 
-        if (!(nhopgroup->first.contains(ipaddr))) {
+        if (!(nhopgroup->first.contains(ipaddr)))
+        {
             continue;
         }
 
         nexthop_id = nhopgroup->second.nhopgroup_members[ipaddr];
         status = sai_next_hop_group_api->remove_next_hop_group_member(nexthop_id);
 
-        if (status != SAI_STATUS_SUCCESS) {
+        if (status != SAI_STATUS_SUCCESS)
+        {
             SWSS_LOG_ERROR("Failed to remove next hop member %lx from group %lx: %d\n",
                            nexthop_id, nhopgroup->second.next_hop_group_id, status);
-            return (false);
+            return false;
         }
+
+        gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP_MEMBER);
     }
 
-    return (true);
+    return true;
 }
 
 void RouteOrch::doTask(Consumer& consumer)
@@ -539,6 +555,8 @@ bool RouteOrch::addNextHopGroup(IpAddresses ipAddresses)
     m_nextHopGroupCount ++;
     SWSS_LOG_NOTICE("Create next hop group %s", ipAddresses.to_string().c_str());
 
+    gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP);
+
     NextHopGroupEntry next_hop_group_entry;
     next_hop_group_entry.next_hop_group_id = next_hop_group_id;
 
@@ -570,6 +588,8 @@ bool RouteOrch::addNextHopGroup(IpAddresses ipAddresses)
             return false;
         }
 
+        gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP_MEMBER);
+
         // Save the membership into next hop structure
         next_hop_group_entry.nhopgroup_members[nhopgroup_members_set.find(nhid)->second] =
                                                                 next_hop_group_member_id;
@@ -598,6 +618,8 @@ bool RouteOrch::addNextHopGroup(IpAddresses ipAddresses)
             SWSS_LOG_ERROR("Failed to remove next hop group member %lx: %d\n",
                            next_hop_id, status);
         }
+
+        gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP_MEMBER);
     }
 
     return true;
@@ -613,18 +635,29 @@ bool RouteOrch::removeNextHopGroup(IpAddresses ipAddresses)
 
     assert(next_hop_group_entry != m_syncdNextHopGroups.end());
 
-    if (next_hop_group_entry->second.ref_count != 0) {
-        return (true);
+    if (next_hop_group_entry->second.ref_count != 0)
+    {
+        return true;
     }
 
     next_hop_group_id = next_hop_group_entry->second.next_hop_group_id;
+    SWSS_LOG_NOTICE("Delete next hop group %s", ipAddresses.to_string().c_str());
 
     for (auto nhop = next_hop_group_entry->second.nhopgroup_members.begin();
-         nhop != next_hop_group_entry->second.nhopgroup_members.end();) {
+         nhop != next_hop_group_entry->second.nhopgroup_members.end();)
+    {
 
-        if (m_neighOrch->isNextHopFlagSet(nhop->first, NHFLAGS_IFDOWN)) {
+        if (m_neighOrch->isNextHopFlagSet(nhop->first, NHFLAGS_IFDOWN))
+        {
             nhop = next_hop_group_entry->second.nhopgroup_members.erase(nhop);
             continue;
+        }
+        status = sai_next_hop_group_api->remove_next_hop_group_member(nhop->second);
+        if (status != SAI_STATUS_SUCCESS)
+        {
+            SWSS_LOG_ERROR("Failed to remove next hop group member %lx, rv:%d",
+                           nhop->second, status);
+            return false;
         }
         status = sai_next_hop_group_api->remove_next_hop_group_member(nhop->second);
         if (status != SAI_STATUS_SUCCESS) {
@@ -635,16 +668,23 @@ bool RouteOrch::removeNextHopGroup(IpAddresses ipAddresses)
         nhop = next_hop_group_entry->second.nhopgroup_members.erase(nhop);
     }
 
+        gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP_MEMBER);
+        nhop = next_hop_group_entry->second.nhopgroup_members.erase(nhop);
+    }
+
     status = sai_next_hop_group_api->remove_next_hop_group(next_hop_group_id);
-    if (status != SAI_STATUS_SUCCESS) {
+    if (status != SAI_STATUS_SUCCESS)
+    {
         SWSS_LOG_ERROR("Failed to remove next hop group %lx, rv:%d", next_hop_group_id, status);
-        return (false);
+        return false;
     }
 
     m_nextHopGroupCount --;
+    gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP);
 
     set<IpAddress> ip_address_set = ipAddresses.getIpAddresses();
-    for (auto it : ip_address_set) {
+    for (auto it : ip_address_set)
+    {
         m_neighOrch->decreaseNextHopRefCount(it);
     }
     m_syncdNextHopGroups.erase(ipAddresses);
@@ -774,6 +814,15 @@ bool RouteOrch::addRoute(IpPrefix ipPrefix, IpAddresses nextHops)
             return false;
         }
 
+        if (route_entry.destination.addr_family == SAI_IP_ADDR_FAMILY_IPV4)
+        {
+            gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV4_ROUTE);
+        }
+        else
+        {
+            gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV6_ROUTE);
+        }
+
         /* Increase the ref_count for the next hop (group) entry */
         increaseNextHopRefCount(nextHops);
         SWSS_LOG_INFO("Create route %s with next hop(s) %s",
@@ -876,8 +925,17 @@ bool RouteOrch::removeRoute(IpPrefix ipPrefix)
             SWSS_LOG_ERROR("Failed to remove route prefix:%s\n", ipPrefix.to_string().c_str());
             return false;
         }
-    }
 
+        if (route_entry.destination.addr_family == SAI_IP_ADDR_FAMILY_IPV4)
+        {
+            gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_IPV4_ROUTE);
+        }
+        else
+        {
+            gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_IPV6_ROUTE);
+        }
+
+    }
     /* Remove next hop group entry if ref_count is zero */
     auto it_route = m_syncdRoutes.find(ipPrefix);
     if (it_route != m_syncdRoutes.end())
