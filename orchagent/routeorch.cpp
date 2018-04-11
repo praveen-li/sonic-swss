@@ -659,14 +659,6 @@ bool RouteOrch::removeNextHopGroup(IpAddresses ipAddresses)
                            nhop->second, status);
             return false;
         }
-        status = sai_next_hop_group_api->remove_next_hop_group_member(nhop->second);
-        if (status != SAI_STATUS_SUCCESS) {
-            SWSS_LOG_ERROR("Failed to remove next hop group member %lx, rv:%d",
-                           nhop->second, status);
-            return (false);
-        }
-        nhop = next_hop_group_entry->second.nhopgroup_members.erase(nhop);
-    }
 
         gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_NEXTHOP_GROUP_MEMBER);
         nhop = next_hop_group_entry->second.nhopgroup_members.erase(nhop);
@@ -689,7 +681,7 @@ bool RouteOrch::removeNextHopGroup(IpAddresses ipAddresses)
     }
     m_syncdNextHopGroups.erase(ipAddresses);
 
-    return (true);
+    return true;
 }
 
 void RouteOrch::addTempRoute(IpPrefix ipPrefix, IpAddresses nextHops)
