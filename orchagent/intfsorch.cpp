@@ -135,34 +135,6 @@ void IntfsOrch::doTask(Consumer &consumer)
                 continue;
             }
 
-            /* NOTE: Overlap checking is required to handle ifconfig weird behavior.
-             * When set IP address using ifconfig command it applies it in two stages.
-             * On stage one it sets IP address with netmask /8. On stage two it
-             * changes netmask to specified in command. As DB is async event to
-             * add IP address with original netmask may come before event to
-             * delete IP with netmask /8. To handle this we in case of overlap
-             * we should wait until entry with /8 netmask will be removed.
-             * Time frame between those event is quite small.*/
-            bool overlaps = false;
-            for (const auto &prefixIt: m_syncdIntfses[alias].ip_addresses)
-            {
-                if (prefixIt.isAddressInSubnet(ip_prefix.getIp()) ||
-                        ip_prefix.isAddressInSubnet(prefixIt.getIp()))
-                {
-                    overlaps = true;
-                    SWSS_LOG_NOTICE("Router interface %s IP %s overlaps with %s.", port.m_alias.c_str(),
-                            prefixIt.to_string().c_str(), ip_prefix.to_string().c_str());
-                    break;
-                }
-            }
-
-            if (overlaps)
-            {
-                /* Overlap of IP address network */
-                ++it;
-                continue;
-            }
-
             /* Creating intfRoutes associated to this interface being added */
             createIntfRoutes(IntfRouteEntry(ip_prefix, alias), port);
 
@@ -523,14 +495,14 @@ bool IntfsOrch::trackIntfRouteOverlap(const IntfRouteEntry &ifRoute)
     {
         if (curIfRoute.prefix == ifRoute.prefix)
         {
-            SWSS_LOG_ERROR("New %s route %s for interface %s overlaps with "
-                           "existing route %s for interface %s. "
-                           "Skipping...",
-                           ifRoute.type.c_str(),
-                           ifRouteStr.c_str(),
-                           ifRoute.ifName.c_str(),
-                           curIfRoute.prefix.to_string().c_str(),
-                           curIfRoute.ifName.c_str());
+            SWSS_LOG_WARN("New %s route %s for interface %s overlaps with "
+                          "existing route %s for interface %s. "
+                          "Skipping...",
+                          ifRoute.type.c_str(),
+                          ifRouteStr.c_str(),
+                          ifRoute.ifName.c_str(),
+                          curIfRoute.prefix.to_string().c_str(),
+                          curIfRoute.ifName.c_str());
 
             iterIfRoute->second.push_back(ifRoute);
             return true;
