@@ -585,20 +585,38 @@ bool IntfsOrch::trackIntfRouteOverlap(const IntfRouteEntry &ifRoute)
         return false;
     }
 
+    auto ifRouteScope = ifRoute.prefix.getIp().getAddrScope();
+
     auto listIfRoutes = iterIfRoute->second;
 
     for (auto &curIfRoute : listIfRoutes)
     {
         if (curIfRoute.prefix == ifRoute.prefix)
         {
-            SWSS_LOG_WARN("New %s route %s for interface %s overlaps with "
-                          "existing route %s for interface %s. "
-                          "Skipping...",
-                          ifRoute.type.c_str(),
-                          ifRouteStr.c_str(),
-                          ifRoute.ifName.c_str(),
-                          curIfRoute.prefix.to_string().c_str(),
-                          curIfRoute.ifName.c_str());
+            /*
+             * At this point we have identified a previously configured interface
+             * that matches the new one being processed. However, not all
+             * 'matches' necessarily constitute an 'overlap' scenario. Logs will
+             * be only dumped upon detection of:
+             *
+             * 1) interface-subnet matches for global-scope prefixes, or...
+             * 2) interface-subnet matches associated to link-local prefixes that
+             * are configured within the same interface; notice that different
+             * interfaces carrying the same link-local prefix is a perfectly
+             * valid scenario that shouldn't be notified to the user.
+             */
+            if ((ifRouteScope != IpAddress::AddrScope::LINK_SCOPE) ||
+                (ifRoute.ifName == curIfRoute.ifName)) {
+
+                SWSS_LOG_WARN("New %s route %s for interface %s overlaps with "
+                              "existing route %s for interface %s. "
+                              "Skipping...",
+                              ifRoute.type.c_str(),
+                              ifRouteStr.c_str(),
+                              ifRoute.ifName.c_str(),
+                              curIfRoute.prefix.to_string().c_str(),
+                              curIfRoute.ifName.c_str());
+            }
 
             iterIfRoute->second.push_back(ifRoute);
             return true;
