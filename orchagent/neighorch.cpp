@@ -297,17 +297,23 @@ void NeighOrch::doTask(Consumer &consumer)
 
         IpAddress ip_address(key.substr(found+1));
 
-        /* In link-local on vlan case, we don't add/remove neighbor entries */
-        string neighborIpSubstr = ip_address.to_string().substr(0, 5);
-        if (p.m_type == Port::VLAN && (neighborIpSubstr == "fe80:" || neighborIpSubstr == "FE80:"))
+        /*
+         * When dealing with link-scope addresses defined over VLAN interfaces,
+         * we will not create nor remove neighbor-entries associated to this
+         * interface. This is motivated by a current limitation in both sonic
+         * and sai implementations, that prevent the creation of more than one
+         * host-route to the same neighbor ip-address through different intfs.
+         */
+        if ((p.m_type == Port::VLAN) &&
+            (ip_address.getAddrScope() == IpAddress::AddrScope::LINK_SCOPE))
         {
-            SWSS_LOG_DEBUG("Skipping adding/removing neighbor entries for IPv6 local-scope "
-	        "neighbor %s on intf %s",
-	        ip_address.to_string().c_str(),
-	        alias.c_str());
+            SWSS_LOG_DEBUG("Skipping adding/removing neighbor entries for "
+                           "link-local neighbor %s on intf %s",
+                           ip_address.to_string().c_str(),
+                           alias.c_str());
             it = consumer.m_toSync.erase(it);
             continue;
-	}
+        }
 
         NeighborEntry neighbor_entry = { ip_address, alias };
 
