@@ -115,7 +115,8 @@ void BufferMgr::doSpeedUpdateTask(string port, string speed)
 
     if (m_cableLenLookup.count(port) == 0)
     {
-        SWSS_LOG_ERROR("Unable to create/update PG profile for port %s. Cable length is not set", port.c_str());
+	/* Set to NOTICE since cable length could be left empty */
+        SWSS_LOG_NOTICE("Unable to create/update PG profile for port %s. Cable length is not set", port.c_str());
         return;
     }
 
