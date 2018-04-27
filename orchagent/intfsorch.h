@@ -53,6 +53,7 @@ struct IntfRouteEntry
  * ----------             -------------------------------------------------------
  * 10.1.1.0/24 (subnet)   10.1.1.0/24 eth1, 10.1.1.0/24 eth2, 10.1.1.0/24 eth3
  * 10.1.1.1/32 (ip2me)    10.1.1.1/32 eth1, 10.1.1.10/32 eth2, 10.1.1.255/32 eth3
+ * 10.1.1.255/32 (bcast)  10.1.1.255/32 eth1, 10.1.1.255/32 eth2
  * ...
  * fe80:1:1/64 (subnet)   fe80:1:1/64 eth1, fe80:1:1/64 eth2
  * fe80:1::1/128 (ip2me)  fe80:1:1::1/128 eth2, fe80:1:1::1/128 eth1
@@ -94,7 +95,8 @@ private:
     bool trackIntfRouteOverlap(const IntfRouteEntry &ifRoute);
 
     IpPrefix getIp2mePrefix(const IpPrefix &ip_prefix);
-    
+    IpPrefix getBcastPrefix(const IpPrefix &ip_prefix);
+
     void addDirectedBroadcast(const Port &port, const IpAddress &ip_addr);
     void removeDirectedBroadcast(const Port &port, const IpAddress &ip_addr);
 };

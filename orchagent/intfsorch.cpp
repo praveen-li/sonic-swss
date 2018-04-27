@@ -140,10 +140,6 @@ void IntfsOrch::doTask(Consumer &consumer)
 
             /* Creating intfRoutes associated to this interface being added */
             createIntfRoutes(IntfRouteEntry(ip_prefix, alias), port);
-            if(port.m_type == Port::VLAN && ip_prefix.isV4())
-            {
-                addDirectedBroadcast(port, ip_prefix.getBroadcastIp());
-            }
 
             m_syncdIntfses[alias].ip_addresses.insert(ip_prefix);
             it = consumer.m_toSync.erase(it);
@@ -179,11 +175,7 @@ void IntfsOrch::doTask(Consumer &consumer)
             {
                 if (iter->second.ip_addresses.count(ip_prefix))
                 {
-                    if(port.m_type == Port::VLAN && ip_prefix.isV4())
-                    {
-                        removeDirectedBroadcast(port, ip_prefix.getBroadcastIp());
-                    }
-                    iter->second.ip_addresses.erase(ip_prefix); 
+                    iter->second.ip_addresses.erase(ip_prefix);
                 }
 
                  /* Remove router interface if there's no ip-address left. */
@@ -566,6 +558,24 @@ void IntfsOrch::createIntfRoutes(const IntfRouteEntry &ifRoute,
             }
         }
     }
+
+    /*
+     * A directed-broadcast route is expected in vlan-ipv4 scenarios. Proceed to
+     * push the route down if no overlap is detected.
+     */
+    if(port.m_type == Port::VLAN && ifRoute.prefix.isV4())
+    {
+        IntfRouteEntry ifBcastRoute(getBcastPrefix(ifRoute.prefix),
+                                    ifRoute.ifName,
+                                    "bcast");
+
+        bool bcastOverlap = trackIntfRouteOverlap(ifBcastRoute);
+
+        if (!bcastOverlap)
+        {
+            addDirectedBroadcast(port, ifBcastRoute.prefix.getIp());
+        }
+    }
 }
 
 /*
@@ -656,6 +666,16 @@ void IntfsOrch::deleteIntfRoutes(const IntfRouteEntry &ifRoute,
         deleteIntfRoute(ifSubnetRoute, port);
     }
     deleteIntfRoute(ifIp2meRoute, port);
+
+    /* Also remove the directed-bcast route if applicable. */
+    if(port.m_type == Port::VLAN && ifRoute.prefix.isV4())
+    {
+        IntfRouteEntry ifBcastRoute(getBcastPrefix(ifRoute.prefix),
+                                    ifRoute.ifName,
+                                    "bcast");
+
+        deleteIntfRoute(ifBcastRoute, port);
+    }
 }
 
 void IntfsOrch::deleteIntfRoute(const IntfRouteEntry &ifRoute, const Port &port)
@@ -705,6 +725,10 @@ void IntfsOrch::deleteIntfRoute(const IntfRouteEntry &ifRoute, const Port &port)
                 else if (it->type == "ip2me")
                 {
                     removeIp2MeRoute(ifRoute.prefix);
+                }
+                else if (it->type == "bcast")
+                {
+                    removeDirectedBroadcast(port, ifRoute.prefix.getIp());
                 }
 
                 /*
@@ -774,16 +798,30 @@ void IntfsOrch::resurrectIntfRoute(const IntfRouteEntry &ifRoute)
     {
         addIp2MeRoute(ifRoute.prefix);
     }
+    else if (ifRoute.type == "bcast")
+    {
+        addDirectedBroadcast(port, ifRoute.prefix.getIp());
+    }
 }
 
 /*
- * Perhaps to be moved to a more appropriate location (e.g. IpPrefix class).
+ * Helper functions. Perhaps to be moved to a more appropriate location (e.g.
+ * IpPrefix class).
  */
 IpPrefix IntfsOrch::getIp2mePrefix(const IpPrefix &ip_prefix)
 {
     string newRoutePrefixStr = ip_prefix.isV4() ?
         ip_prefix.getIp().to_string() + "/32" :
         ip_prefix.getIp().to_string() + "/128";
+
+    return (IpPrefix(newRoutePrefixStr));
+}
+
+IpPrefix IntfsOrch::getBcastPrefix(const IpPrefix &ip_prefix)
+{
+    string newRoutePrefixStr = ip_prefix.isV4() ?
+        ip_prefix.getBroadcastIp().to_string() + "/32" :
+        ip_prefix.getBroadcastIp().to_string() + "/128";
 
     return (IpPrefix(newRoutePrefixStr));
 }
