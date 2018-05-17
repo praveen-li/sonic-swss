@@ -23,8 +23,8 @@
         "OP": "SET"
     },
     {
-        "COPP_TABLE:trap.group.ip2me": {
-            "trap_ids": "ip2me",
+        "COPP_TABLE:trap.group.ip2me.udld": {
+            "trap_ids": "ip2me,udld",
             "trap_action":"trap",
             "trap_priority":"1",
             "queue": "1",
