@@ -35,8 +35,8 @@ extern CrmOrch *gCrmOrch;
 #define DEFAULT_VLAN_ID     1
 #define PORT_FLEX_STAT_COUNTER_POLL_MSECS "1000"
 
-/* Use interval 0 to disable queue polling thread */
-#define QUEUE_FLEX_STAT_COUNTER_POLL_MSECS "0"
+/* queue polling thread interval is set to 10 seconds */
+#define QUEUE_FLEX_STAT_COUNTER_POLL_MSECS "10000"
 #define PORT_STAT_COUNTER_FLEX_COUNTER_GROUP "PORT_STAT_COUNTER"
 #define QUEUE_STAT_COUNTER_FLEX_COUNTER_GROUP "QUEUE_STAT_COUNTER"
 
