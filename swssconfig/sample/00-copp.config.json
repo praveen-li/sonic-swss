@@ -1,7 +1,7 @@
 [
     {
-        "COPP_TABLE:trap.group.bgp.lldp": {
-            "trap_ids": "bgp,bgpv6,lldp",
+        "COPP_TABLE:trap.group.bgp.lldp,lacp": {
+            "trap_ids": "bgp,bgpv6,lldp,lacp",
             "trap_action":"trap",
             "trap_priority":"4",
             "queue": "4"
