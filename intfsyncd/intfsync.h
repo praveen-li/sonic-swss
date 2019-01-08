@@ -5,6 +5,8 @@
 #include "producerstatetable.h"
 #include "netmsg.h"
 
+#define DUMMY_INTF_NAME     "dummy"
+
 namespace swss {
 
 class IntfSync : public NetMsg

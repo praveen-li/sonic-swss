@@ -45,8 +45,20 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
         return;
 
     key = LinkCache::getInstance().ifindexToName(rtnl_addr_get_ifindex(addr));
-    key+= ":";
+
     nl_addr2str(rtnl_addr_get_local(addr), addrStr, MAX_ADDR_SIZE);
+
+    /*
+     * Dummy interface IP addresses are ignored
+     * Otherwise, the IPs (e,g, link-local) on dummy interface would be handled uneccessarily
+     */
+    if (key == DUMMY_INTF_NAME)
+    {
+	SWSS_LOG_NOTICE("IP: %s on dummy interface is ignored", addrStr);
+	return;
+    }
+
+    key+= ":";
     key+= addrStr;
     if (nlmsg_type == RTM_DELADDR)
     {
