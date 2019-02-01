@@ -298,14 +298,13 @@ void NeighOrch::doTask(Consumer &consumer)
         IpAddress ip_address(key.substr(found+1));
 
         /*
-         * When dealing with link-scope addresses defined over VLAN interfaces,
-         * we will not create nor remove neighbor-entries associated to this
-         * interface. This is motivated by a current limitation in both sonic
-         * and sai implementations, that prevent the creation of more than one
-         * host-route to the same neighbor ip-address through different intfs.
+         * When dealing with link-scope addresses we will not create nor remove
+         * neighbor-entries. This is motivated by a few SAI implementation
+         * constrains, that prevent the creation of more than one host-route to
+         * the same neighbor ip-address through different intfs. This if-statement
+         * should be eliminated the moment these issues are fixed at SAI level.
          */
-        if ((p.m_type == Port::VLAN) &&
-            (ip_address.getAddrScope() == IpAddress::AddrScope::LINK_SCOPE))
+        if (ip_address.getAddrScope() == IpAddress::AddrScope::LINK_SCOPE)
         {
             SWSS_LOG_DEBUG("Skipping adding/removing neighbor entries for "
                            "link-local neighbor %s on intf %s",
