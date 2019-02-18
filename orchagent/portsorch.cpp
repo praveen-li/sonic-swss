@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <tuple>
 #include <sstream>
+#include <string>
 
 #include <netinet/if_ether.h>
 #include "net/if.h"
@@ -902,6 +903,40 @@ bool PortsOrch::setHostIntfsOperStatus(sai_object_id_t port_id, bool up)
     return false;
 }
 
+void PortsOrch::updateDbPortFlapCounter(const string &alias)
+{
+    SWSS_LOG_ENTER();
+
+    string flap_value;
+
+    /* Fetching current flap counters from redis DB and incrementing it by 1 under any UP or DOWN event */
+
+    vector<FieldValueTuple> tuples;
+    bool exist = m_portTable->get(alias, tuples);
+    if (!exist)
+    {
+      return;
+    }
+
+    for (auto const &i : tuples)
+    {
+      if (fvField(i) == "flap_counter")
+      {
+        flap_value = fvValue(i);
+      }
+    }
+
+    long flap_val = stol(flap_value);
+    flap_val = flap_val + 1;
+    string flaps;
+    stringstream flap_stream;
+    flap_stream << flap_val;
+    flaps = flap_stream.str();
+    FieldValueTuple tuple("flap_counter", flaps);
+    tuples.push_back(tuple);
+    m_portTable->set(alias, tuples);
+}
+
 void PortsOrch::updateDbPortOperStatus(sai_object_id_t id, sai_port_oper_status_t status)
 {
     SWSS_LOG_ENTER();
@@ -910,6 +945,7 @@ void PortsOrch::updateDbPortOperStatus(sai_object_id_t id, sai_port_oper_status_
     {
         if (it->second.m_port_id == id)
         {
+            updateDbPortFlapCounter(it->first);
             vector<FieldValueTuple> tuples;
             FieldValueTuple tuple("oper_status", oper_status_strings.at(status));
             tuples.push_back(tuple);
@@ -1867,6 +1903,8 @@ bool PortsOrch::initializePort(Port &p)
     vector<FieldValueTuple> vector;
     FieldValueTuple tuple("oper_status", "down");
     vector.push_back(tuple);
+    FieldValueTuple flap_tuple("flap_counter", "0");
+    vector.push_back(flap_tuple);
     m_portTable->set(p.m_alias, vector);
 
     CounterCheckOrch::getInstance().addPort(p);
