@@ -13,9 +13,50 @@
 using namespace std;
 using namespace swss;
 
-IntfSync::IntfSync(DBConnector *db) :
-    m_intfTable(db, APP_INTF_TABLE_NAME)
+IntfSync::IntfSync(DBConnector *appDb, DBConnector *stateDb) :
+    m_intfTable(appDb, APP_INTF_TABLE_NAME),
+    m_statePortTable(stateDb, STATE_PORT_TABLE_NAME, STATEDB_TABLE_NAME_SEPARATOR),
+    m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME, STATEDB_TABLE_NAME_SEPARATOR),
+    m_stateVlanTable(stateDb, STATE_VLAN_TABLE_NAME, STATEDB_TABLE_NAME_SEPARATOR)
 {
+}
+
+bool IntfSync::isIntfStateOk(const string &alias)
+{
+    vector<FieldValueTuple> temp;
+
+    if (!alias.compare(0, strlen(VLAN_PREFIX), VLAN_PREFIX))
+    {
+        if (m_stateVlanTable.get(alias, temp))
+        {
+            SWSS_LOG_DEBUG("Vlan %s is ready", alias.c_str());
+            return true;
+        }
+    }
+    else if (!alias.compare(0, strlen(LAG_PREFIX), LAG_PREFIX))
+    {
+        if (m_stateLagTable.get(alias, temp))
+        {
+            SWSS_LOG_DEBUG("Lag %s is ready", alias.c_str());
+            return true;
+        }
+    }
+    else if (!alias.compare(0, strlen(PORT_PREFIX), PORT_PREFIX))
+    {
+        if (m_statePortTable.get(alias, temp))
+        {
+            SWSS_LOG_DEBUG("Port %s is ready", alias.c_str());
+            return true;
+        }
+    }
+    else
+    {
+        SWSS_LOG_DEBUG("Special Port %s is always considered as ready", alias.c_str());
+        return true;
+    }
+
+    SWSS_LOG_DEBUG("Interface %s is not ready", alias.c_str());
+    return false;
 }
 
 void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
@@ -48,13 +89,45 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
 
     nl_addr2str(rtnl_addr_get_local(addr), addrStr, MAX_ADDR_SIZE);
 
+    string msg_type_str;
+    switch (nlmsg_type)
+    {
+        case RTM_GETADDR:
+	    msg_type_str = "GET_ADDR";
+	    break;
+        case RTM_NEWADDR:
+	    msg_type_str = "NEW_ADDR";
+	    break;
+        case RTM_DELADDR:
+	    msg_type_str = "DEL_ADDR";
+	    break;
+        default:
+	    msg_type_str = "UNKNOWN";
+	    break;
+    }
+
+    SWSS_LOG_DEBUG("Interface %s:%s netlink with type %s is received",
+      key.c_str(), addrStr, msg_type_str.c_str());
+
     /*
      * Dummy interface IP addresses are ignored
      * Otherwise, the IPs (e,g, link-local) on dummy interface would be handled uneccessarily
      */
     if (key == DUMMY_INTF_NAME)
     {
-	SWSS_LOG_NOTICE("IP: %s on dummy interface is ignored", addrStr);
+        SWSS_LOG_NOTICE("IP: %s on dummy interface is ignored", addrStr);
+        return;
+    }
+
+    /*
+     * If interface is not ready, we skip the netlink messages
+     * This could happen if we reload config and get netlink messages
+     * from old kernel interfaces
+     */
+    if (!isIntfStateOk(key))
+    {
+        SWSS_LOG_NOTICE("Interface %s with ip %s is not ready, netlink type %s"
+	  " is received and skipped", key.c_str(), addrStr, msg_type_str.c_str());
 	return;
     }
 

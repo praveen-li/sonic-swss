@@ -88,6 +88,10 @@ void IntfsOrch::doTask(Consumer &consumer)
         }
 
         string op = kfvOp(t);
+
+	SWSS_LOG_DEBUG("Interface %s ip %s request with type %s is received",
+	  alias.c_str(), ip_prefix.to_string().c_str(), op.c_str());
+
         if (op == SET_COMMAND)
         {
             if (alias == "lo")
@@ -126,6 +130,10 @@ void IntfsOrch::doTask(Consumer &consumer)
                 }
                 else
                 {
+                    /*
+                     * TBD -- link local on bridge port need to be handled here
+                     * Otherwise, the request will be hit here endlessly
+                     */
                     it++;
                     continue;
                 }
