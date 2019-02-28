@@ -9,6 +9,7 @@
 #include <tuple>
 #include <sstream>
 #include <string>
+#include <ctime>
 
 #include <netinet/if_ether.h>
 #include "net/if.h"
@@ -903,27 +904,30 @@ bool PortsOrch::setHostIntfsOperStatus(sai_object_id_t port_id, bool up)
     return false;
 }
 
-void PortsOrch::updateDbPortFlapCounter(const string &alias)
+void PortsOrch::updateDbPortFlapCounter(const string &alias, vector<FieldValueTuple>& old_tuples, vector<FieldValueTuple>& new_tuples)
 {
     SWSS_LOG_ENTER();
 
     string flap_value;
+    bool check = false;
 
     /* Fetching current flap counters from redis DB and incrementing it by 1 under any UP or DOWN event */
 
-    vector<FieldValueTuple> tuples;
-    bool exist = m_portTable->get(alias, tuples);
-    if (!exist)
-    {
-      return;
-    }
+    FieldValueTuple tuple;
 
-    for (auto const &i : tuples)
+    for (auto const &i : old_tuples)
     {
       if (fvField(i) == "flap_counter")
       {
         flap_value = fvValue(i);
+        check = true;
+        break;
       }
+    }
+
+    if (!check)
+    {
+      return;
     }
 
     long flap_val = stol(flap_value);
@@ -932,12 +936,25 @@ void PortsOrch::updateDbPortFlapCounter(const string &alias)
     stringstream flap_stream;
     flap_stream << flap_val;
     flaps = flap_stream.str();
-    FieldValueTuple tuple("flap_counter", flaps);
-    tuples.push_back(tuple);
-    m_portTable->set(alias, tuples);
+    FieldValueTuple flap_tuple("flap_counter", flaps);
+    new_tuples.push_back(flap_tuple);
 }
 
-void PortsOrch::updateDbPortOperStatus(sai_object_id_t id, sai_port_oper_status_t status)
+void PortsOrch::updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples)
+{
+    SWSS_LOG_ENTER();
+
+    time_t now = time(0);
+    string date = ctime(&now);
+
+    // convert now to tm struct for UTC
+    tm *gmtm = gmtime(&now);
+    date = asctime(gmtm);
+    FieldValueTuple tuple("last_flap", date);
+    new_tuples.push_back(tuple);
+}
+
+void PortsOrch::updateDbPortStatus(sai_object_id_t id, sai_port_oper_status_t status)
 {
     SWSS_LOG_ENTER();
 
@@ -945,11 +962,19 @@ void PortsOrch::updateDbPortOperStatus(sai_object_id_t id, sai_port_oper_status_
     {
         if (it->second.m_port_id == id)
         {
-            updateDbPortFlapCounter(it->first);
-            vector<FieldValueTuple> tuples;
+            vector<FieldValueTuple> old_tuples;
+            vector<FieldValueTuple> new_tuples;
+
+            bool exist = m_portTable->get(it->first, old_tuples);
+            if (!exist)
+            {
+              return;
+            }
+            updateDbPortLastFlapTime(new_tuples);
+            updateDbPortFlapCounter(it->first, old_tuples, new_tuples);
             FieldValueTuple tuple("oper_status", oper_status_strings.at(status));
-            tuples.push_back(tuple);
-            m_portTable->set(it->first, tuples);
+            new_tuples.push_back(tuple);
+            m_portTable->set(it->first, new_tuples);
         }
     }
 }
@@ -1905,6 +1930,8 @@ bool PortsOrch::initializePort(Port &p)
     vector.push_back(tuple);
     FieldValueTuple flap_tuple("flap_counter", "0");
     vector.push_back(flap_tuple);
+    FieldValueTuple last_flap("last_flap", "N/A");
+    vector.push_back(last_flap);
     m_portTable->set(p.m_alias, vector);
 
     CounterCheckOrch::getInstance().addPort(p);

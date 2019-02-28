@@ -55,7 +55,7 @@ public:
     bool getVlanByVlanId(sai_vlan_id_t vlan_id, Port &vlan);
 
     bool setHostIntfsOperStatus(sai_object_id_t id, bool up);
-    void updateDbPortOperStatus(sai_object_id_t id, sai_port_oper_status_t status);
+    void updateDbPortStatus(sai_object_id_t id, sai_port_oper_status_t status);
     bool bindAclTable(sai_object_id_t id, sai_object_id_t table_oid, sai_object_id_t &group_member_oid, acl_stage_type_t acl_stage = ACL_STAGE_INGRESS);
 private:
     unique_ptr<Table> m_counterTable;
@@ -135,6 +135,7 @@ private:
     bool getPortSpeed(sai_object_id_t port_id, sai_uint32_t &speed);
 
     bool getQueueType(sai_object_id_t queue_id, string &type);
-    void updateDbPortFlapCounter(const string &alias);
+    void updateDbPortFlapCounter(const string &alias, vector<FieldValueTuple>& old_tuples, vector<FieldValueTuple>& new_tuples);
+    void updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples);
 };
 #endif /* SWSS_PORTSORCH_H */
