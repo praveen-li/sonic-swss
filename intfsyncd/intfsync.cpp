@@ -110,12 +110,12 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
       key.c_str(), addrStr, msg_type_str.c_str());
 
     /*
-     * Dummy interface IP addresses are ignored
-     * Otherwise, the IPs (e,g, link-local) on dummy interface would be handled uneccessarily
+     * interface IP addresses on special interfaces (dummy, usb0 etc) are ignored
+     * Otherwise, the IPs (e,g, link-local) on the interfaces would be handled uneccessarily
      */
-    if (key == DUMMY_INTF_NAME)
+    if (key == DUMMY_INTF_NAME || key == USB_INTF_NAME)
     {
-        SWSS_LOG_NOTICE("IP: %s on dummy interface is ignored", addrStr);
+        SWSS_LOG_NOTICE("IP: %s on interface: %s is ignored", addrStr, key.c_str());
         return;
     }
 

@@ -8,6 +8,7 @@
 
 #define STATEDB_TABLE_NAME_SEPARATOR CONFIGDB_TABLE_NAME_SEPARATOR
 #define DUMMY_INTF_NAME     "dummy"
+#define USB_INTF_NAME       "usb0"
 #define VLAN_PREFIX         "Vlan"
 #define LAG_PREFIX          "PortChannel"
 #define PORT_PREFIX         "Ethernet"
