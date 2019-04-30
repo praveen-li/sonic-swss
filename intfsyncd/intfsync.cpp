@@ -33,14 +33,6 @@ bool IntfSync::isIntfStateOk(const string &alias)
             return true;
         }
     }
-    else if (!alias.compare(0, strlen(LAG_PREFIX), LAG_PREFIX))
-    {
-        if (m_stateLagTable.get(alias, temp))
-        {
-            SWSS_LOG_DEBUG("Lag %s is ready", alias.c_str());
-            return true;
-        }
-    }
     else if (!alias.compare(0, strlen(PORT_PREFIX), PORT_PREFIX))
     {
         if (m_statePortTable.get(alias, temp))
