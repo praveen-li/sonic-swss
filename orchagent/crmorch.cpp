@@ -12,7 +12,7 @@
 #define CRM_THRESHOLD_LOW_DEFAULT 70
 #define CRM_THRESHOLD_HIGH_DEFAULT 85
 #define CRM_EXCEEDED_MSG_MAX 10
-#define CRM_MAX_ACL_TABLE_OR_GROUP  256
+#define CRM_ACL_RESOURCE_COUNT 256
 
 extern sai_object_id_t gSwitchId;
 extern sai_switch_api_t *sai_switch_api;
@@ -162,8 +162,12 @@ CrmOrch::CrmOrch(DBConnector *db, string tableName):
         m_resourcesMap.emplace(res.first, CrmResourceEntry(res.second, CRM_THRESHOLD_TYPE_DEFAULT, CRM_THRESHOLD_LOW_DEFAULT, CRM_THRESHOLD_HIGH_DEFAULT));
     }
 
-    auto executor = new ExecutableTimer(m_timer.get(), this);
-    Orch::addExecutor("CRM_COUNTERS_POLL", executor);
+    // The CRM stats needs to be populated again
+    m_countersCrmTable->del(CRM_COUNTERS_TABLE_KEY);
+
+    // Note: ExecutableTimer will hold m_timer pointer and release the object later
+    auto executor = new ExecutableTimer(m_timer, this, "CRM_COUNTERS_POLL");
+    Orch::addExecutor(executor);
     m_timer->start();
 }
 
@@ -333,7 +337,7 @@ void CrmOrch::decCrmAclUsedCounter(CrmResourceType resource, sai_acl_stage_t sta
     {
         m_resourcesMap.at(resource).countersMap[getCrmAclKey(stage, point)].usedCounter--;
 
-        // Remove ACL table related counters 
+        // Remove ACL table related counters
         if (resource == CrmResourceType::CRM_ACL_TABLE)
         {
             auto & cntMap = m_resourcesMap.at(CrmResourceType::CRM_ACL_TABLE).countersMap;
@@ -437,10 +441,9 @@ void CrmOrch::getResAvailableCounters()
             case SAI_SWITCH_ATTR_AVAILABLE_ACL_TABLE:
             case SAI_SWITCH_ATTR_AVAILABLE_ACL_TABLE_GROUP:
             {
-                const int aclResourceCount = CRM_MAX_ACL_TABLE_OR_GROUP;
-                vector<sai_acl_resource_t> resources(aclResourceCount);
+                vector<sai_acl_resource_t> resources(CRM_ACL_RESOURCE_COUNT);
 
-                attr.value.aclresource.count = aclResourceCount;
+                attr.value.aclresource.count = CRM_ACL_RESOURCE_COUNT;
                 attr.value.aclresource.list = resources.data();
                 sai_status_t status = sai_switch_api->get_switch_attribute(gSwitchId, 1, &attr);
                 if (status == SAI_STATUS_BUFFER_OVERFLOW)
@@ -601,7 +604,7 @@ string CrmOrch::getCrmAclKey(sai_acl_stage_t stage, sai_acl_bind_point_type_t bi
         case SAI_ACL_BIND_POINT_TYPE_VLAN:
             key += ":VLAN";
             break;
-        case SAI_ACL_BIND_POINT_TYPE_ROUTER_INTFERFACE:
+        case SAI_ACL_BIND_POINT_TYPE_ROUTER_INTERFACE:
             key += ":RIF";
             break;
         case SAI_ACL_BIND_POINT_TYPE_SWITCH:

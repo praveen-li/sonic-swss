@@ -11,6 +11,7 @@
 #include "orch.h"
 #include "portsorch.h"
 #include "mirrororch.h"
+#include "dtelorch.h"
 #include "observer.h"
 
 // ACL counters update interval in the DB
@@ -25,14 +26,19 @@
 #define TABLE_DESCRIPTION "POLICY_DESC"
 #define TABLE_TYPE        "TYPE"
 #define TABLE_PORTS       "PORTS"
+#define TABLE_SERVICES    "SERVICES"
 
 #define TABLE_TYPE_L3        "L3"
 #define TABLE_TYPE_L3V6      "L3V6"
 #define TABLE_TYPE_MIRROR    "MIRROR"
 #define TABLE_TYPE_PFCWD     "PFCWD"
 #define TABLE_TYPE_CTRLPLANE "CTRLPLANE"
+#define TABLE_TYPE_DTEL_FLOW_WATCHLIST "DTEL_FLOW_WATCHLIST"
+#define TABLE_TYPE_DTEL_DROP_WATCHLIST "DTEL_DROP_WATCHLIST"
 
 #define RULE_PRIORITY           "PRIORITY"
+#define MATCH_IN_PORTS          "IN_PORTS"
+#define MATCH_OUT_PORTS         "OUT_PORTS"
 #define MATCH_SRC_IP            "SRC_IP"
 #define MATCH_DST_IP            "DST_IP"
 #define MATCH_SRC_IPV6          "SRC_IPV6"
@@ -47,13 +53,32 @@
 #define MATCH_L4_SRC_PORT_RANGE "L4_SRC_PORT_RANGE"
 #define MATCH_L4_DST_PORT_RANGE "L4_DST_PORT_RANGE"
 #define MATCH_TC                "TC"
+#define MATCH_TUNNEL_VNI        "TUNNEL_VNI"
+#define MATCH_INNER_ETHER_TYPE  "INNER_ETHER_TYPE"
+#define MATCH_INNER_IP_PROTOCOL "INNER_IP_PROTOCOL"
+#define MATCH_INNER_L4_SRC_PORT "INNER_L4_SRC_PORT"
+#define MATCH_INNER_L4_DST_PORT "INNER_L4_DST_PORT"
 
 #define ACTION_PACKET_ACTION    "PACKET_ACTION"
 #define ACTION_MIRROR_ACTION    "MIRROR_ACTION"
+#define ACTION_DTEL_FLOW_OP                 "FLOW_OP"
+#define ACTION_DTEL_INT_SESSION             "INT_SESSION"
+#define ACTION_DTEL_DROP_REPORT_ENABLE      "DROP_REPORT_ENABLE"
+#define ACTION_DTEL_TAIL_DROP_REPORT_ENABLE "TAIL_DROP_REPORT_ENABLE"
+#define ACTION_DTEL_FLOW_SAMPLE_PERCENT     "FLOW_SAMPLE_PERCENT"
+#define ACTION_DTEL_REPORT_ALL_PACKETS      "REPORT_ALL_PACKETS"
 
 #define PACKET_ACTION_FORWARD   "FORWARD"
 #define PACKET_ACTION_DROP      "DROP"
 #define PACKET_ACTION_REDIRECT  "REDIRECT"
+
+#define DTEL_FLOW_OP_NOP        "NOP"
+#define DTEL_FLOW_OP_POSTCARD   "POSTCARD"
+#define DTEL_FLOW_OP_INT        "INT"
+#define DTEL_FLOW_OP_IOAM       "IOAM"
+
+#define DTEL_ENABLED             "TRUE"
+#define DTEL_DISABLED            "FALSE"
 
 #define IP_TYPE_ANY             "ANY"
 #define IP_TYPE_IP              "IP"
@@ -75,12 +100,15 @@ typedef enum
     ACL_TABLE_L3V6,
     ACL_TABLE_MIRROR,
     ACL_TABLE_PFCWD,
-    ACL_TABLE_CTRLPLANE
+    ACL_TABLE_CTRLPLANE,
+    ACL_TABLE_DTEL_FLOW_WATCHLIST,
+    ACL_TABLE_DTEL_DROP_WATCHLIST
 } acl_table_type_t;
 
 typedef map<string, acl_table_type_t> acl_table_type_lookup_t;
 typedef map<string, sai_acl_entry_attr_t> acl_rule_attr_lookup_t;
 typedef map<string, sai_acl_ip_type_t> acl_ip_type_lookup_t;
+typedef map<string, sai_acl_dtel_flow_op_t> acl_dtel_flow_op_type_lookup_t;
 typedef tuple<sai_acl_range_type_t, int, int> acl_range_properties_t;
 
 class AclOrch;
@@ -135,7 +163,7 @@ struct AclRuleCounters
 class AclRule
 {
 public:
-    AclRule(AclOrch *m_pAclOrch, string rule, string table, acl_table_type_t type);
+    AclRule(AclOrch *m_pAclOrch, string rule, string table, acl_table_type_t type, bool createCounter = true);
     virtual bool validateAddPriority(string attr_name, string attr_value);
     virtual bool validateAddMatch(string attr_name, string attr_value);
     virtual bool validateAddAction(string attr_name, string attr_value) = 0;
@@ -167,7 +195,7 @@ public:
         return m_counterOid;
     }
 
-    static shared_ptr<AclRule> makeShared(acl_table_type_t type, AclOrch *acl, MirrorOrch *mirror, const string& rule, const string& table, const KeyOpFieldsValuesTuple&);
+    static shared_ptr<AclRule> makeShared(acl_table_type_t type, AclOrch *acl, MirrorOrch *mirror, DTelOrch *dtel, const string& rule, const string& table, const KeyOpFieldsValuesTuple&);
     virtual ~AclRule() {}
 
 protected:
@@ -191,12 +219,18 @@ protected:
     map <sai_acl_entry_attr_t, sai_attribute_value_t> m_actions;
     string m_redirect_target_next_hop;
     string m_redirect_target_next_hop_group;
+
+    vector<sai_object_id_t> m_inPorts;
+    vector<sai_object_id_t> m_outPorts;
+
+private:
+    bool m_createCounter;
 };
 
 class AclRuleL3: public AclRule
 {
 public:
-    AclRuleL3(AclOrch *m_pAclOrch, string rule, string table, acl_table_type_t type);
+    AclRuleL3(AclOrch *m_pAclOrch, string rule, string table, acl_table_type_t type, bool createCounter = true);
 
     bool validateAddAction(string attr_name, string attr_value);
     bool validateAddMatch(string attr_name, string attr_value);
@@ -216,7 +250,7 @@ public:
 class AclRulePfcwd: public AclRuleL3
 {
 public:
-    AclRulePfcwd(AclOrch *m_pAclOrch, string rule, string table, acl_table_type_t type);
+    AclRulePfcwd(AclOrch *m_pAclOrch, string rule, string table, acl_table_type_t type, bool createCounter = false);
     bool validateAddMatch(string attr_name, string attr_value);
 };
 
@@ -240,6 +274,35 @@ protected:
     MirrorOrch *m_pMirrorOrch;
 };
 
+class AclRuleDTelFlowWatchListEntry: public AclRule
+{
+public:
+    AclRuleDTelFlowWatchListEntry(AclOrch *m_pAclOrch, DTelOrch *m_pDTelOrch, string rule, string table, acl_table_type_t type);
+    bool validateAddAction(string attr_name, string attr_value);
+    bool validate();
+    bool create();
+    bool remove();
+    void update(SubjectType, void *);
+
+protected:
+    DTelOrch *m_pDTelOrch;
+    string m_intSessionId;
+    bool INT_enabled;
+    bool INT_session_valid;
+};
+
+class AclRuleDTelDropWatchListEntry: public AclRule
+{
+public:
+    AclRuleDTelDropWatchListEntry(AclOrch *m_pAclOrch, DTelOrch *m_pDTelOrch, string rule, string table, acl_table_type_t type);
+    bool validateAddAction(string attr_name, string attr_value);
+    bool validate();
+    void update(SubjectType, void *);
+
+protected:
+    DTelOrch *m_pDTelOrch;
+};
+
 class AclTable {
     sai_object_id_t m_oid;
 public:
@@ -252,6 +315,10 @@ public:
     std::map<sai_object_id_t, sai_object_id_t> ports;
     // Map rule name to rule data
     map<string, shared_ptr<AclRule>> rules;
+    // Set to store the ACL table port alias
+    set<string> portSet;
+    // Set to store the not cofigured ACL table port alias
+    set<string> pendingPortSet;
 
     AclTable()
         : type(ACL_TABLE_UNKNOWN)
@@ -280,6 +347,8 @@ public:
     bool remove(string rule_id);
     // Remove all rules from the ACL table
     bool clear();
+    // Update table subject to changes
+    void update(SubjectType, void *);
 };
 
 template <class Iterable>
@@ -298,7 +367,8 @@ inline void split(string str, Iterable& out, char delim = ' ')
 class AclOrch : public Orch, public Observer
 {
 public:
-    AclOrch(DBConnector *db, vector<string> tableNames, PortsOrch *portOrch, MirrorOrch *mirrorOrch, NeighOrch *neighOrch, RouteOrch *routeOrch);
+    AclOrch(vector<TableConnector>& connectors, PortsOrch *portOrch, MirrorOrch *mirrorOrch, NeighOrch *neighOrch, RouteOrch *routeOrch);
+    AclOrch(vector<TableConnector>& connectors, PortsOrch *portOrch, MirrorOrch *mirrorOrch, NeighOrch *neighOrch, RouteOrch *routeOrch, DTelOrch *m_dTelOrch);
     ~AclOrch();
     void update(SubjectType, void *);
 
@@ -313,6 +383,7 @@ public:
     MirrorOrch *m_mirrorOrch;
     NeighOrch *m_neighOrch;
     RouteOrch *m_routeOrch;
+    DTelOrch *m_dTelOrch;
 
     bool addAclTable(AclTable &aclTable, string table_id);
     bool removeAclTable(string table_id);
@@ -324,6 +395,7 @@ private:
     void doAclTableTask(Consumer &consumer);
     void doAclRuleTask(Consumer &consumer);
     void doTask(SelectableTimer &timer);
+    void init(vector<TableConnector>& connectors, PortsOrch *portOrch, MirrorOrch *mirrorOrch, NeighOrch *neighOrch, RouteOrch *routeOrch);
 
     static void collectCountersThread(AclOrch *pAclOrch);
 
@@ -333,11 +405,15 @@ private:
 
     bool processAclTableType(string type, acl_table_type_t &table_type);
     bool processAclTableStage(string stage, acl_stage_type_t &acl_stage);
-    bool processPorts(string portsList, std::function<void (sai_object_id_t)> inserter);
+    bool processAclTablePorts(string portList, AclTable &aclTable);
     bool validateAclTable(AclTable &aclTable);
+    sai_status_t createDTelWatchListTables();
+    sai_status_t deleteDTelWatchListTables();
 
     //vector <AclTable> m_AclTables;
-    map <sai_object_id_t, AclTable> m_AclTables;
+    map<sai_object_id_t, AclTable> m_AclTables;
+    // TODO: Move all ACL tables into one map: name -> instance
+    map<string, AclTable> m_ctrlAclTables;
 
     static mutex m_countersMutex;
     static condition_variable m_sleepGuard;

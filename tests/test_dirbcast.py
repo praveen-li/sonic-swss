@@ -3,25 +3,25 @@ import time
 import re
 import json
 
-def test_DirectedBroadcast(dvs):
+def test_DirectedBroadcast(dvs, testlog):
 
     db = swsscommon.DBConnector(4, dvs.redis_sock, 0)
     adb = swsscommon.DBConnector(1, dvs.redis_sock, 0)
 
     # create vlan in config db
-    tbl = swsscommon.Table(db, "VLAN", '|')
+    tbl = swsscommon.Table(db, "VLAN")
     fvs = swsscommon.FieldValuePairs([("vlanid", "100")])
     tbl.set("Vlan100", fvs)
 
     # create a vlan member in config db
-    tbl = swsscommon.Table(db, "VLAN_MEMBER", '|')
+    tbl = swsscommon.Table(db, "VLAN_MEMBER")
     fvs = swsscommon.FieldValuePairs([("tagging_mode", "tagged")])
     tbl.set("Vlan100|Ethernet24", fvs)
 
     time.sleep(1)
 
     # create vlan interface in config db
-    tbl = swsscommon.Table(db, "VLAN_INTERFACE", '|')
+    tbl = swsscommon.Table(db, "VLAN_INTERFACE")
     fvs = swsscommon.FieldValuePairs([("family", "IPv4")])
     tbl.set("Vlan100|192.169.0.1/27", fvs)
 

@@ -2,44 +2,49 @@
 #define SWSS_QOSORCH_H
 
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
 #include "orch.h"
 #include "portsorch.h"
 
-const string dscp_to_tc_field_name             = "dscp_to_tc_map";
-const string pfc_to_pg_map_name                = "pfc_to_pg_map";
-const string pfc_to_queue_map_name             = "pfc_to_queue_map";
-const string pfc_enable_name                   = "pfc_enable";
-const string tc_to_pg_map_field_name           = "tc_to_pg_map";
-const string tc_to_queue_field_name            = "tc_to_queue_map";
-const string scheduler_field_name              = "scheduler";
-const string red_max_threshold_field_name      = "red_max_threshold";
-const string red_min_threshold_field_name      = "red_min_threshold";
-const string yellow_max_threshold_field_name   = "yellow_max_threshold";
-const string yellow_min_threshold_field_name   = "yellow_min_threshold";
-const string green_max_threshold_field_name    = "green_max_threshold";
-const string green_min_threshold_field_name    = "green_min_threshold";
+const string dscp_to_tc_field_name              = "dscp_to_tc_map";
+const string pfc_to_pg_map_name                 = "pfc_to_pg_map";
+const string pfc_to_queue_map_name              = "pfc_to_queue_map";
+const string pfc_enable_name                    = "pfc_enable";
+const string tc_to_pg_map_field_name            = "tc_to_pg_map";
+const string tc_to_queue_field_name             = "tc_to_queue_map";
+const string scheduler_field_name               = "scheduler";
+const string red_max_threshold_field_name       = "red_max_threshold";
+const string red_min_threshold_field_name       = "red_min_threshold";
+const string yellow_max_threshold_field_name    = "yellow_max_threshold";
+const string yellow_min_threshold_field_name    = "yellow_min_threshold";
+const string green_max_threshold_field_name     = "green_max_threshold";
+const string green_min_threshold_field_name     = "green_min_threshold";
+const string red_drop_probability_field_name    = "red_drop_probability";
+const string yellow_drop_probability_field_name = "yellow_drop_probability";
+const string green_drop_probability_field_name  = "green_drop_probability";
 
-const string wred_profile_field_name           = "wred_profile";
-const string wred_red_enable_field_name        = "wred_red_enable";
-const string wred_yellow_enable_field_name     = "wred_yellow_enable";
-const string wred_green_enable_field_name      = "wred_green_enable";
+const string wred_profile_field_name            = "wred_profile";
+const string wred_red_enable_field_name         = "wred_red_enable";
+const string wred_yellow_enable_field_name      = "wred_yellow_enable";
+const string wred_green_enable_field_name       = "wred_green_enable";
 
-const string scheduler_algo_type_field_name    = "type";
-const string scheduler_algo_DWRR               = "DWRR";
-const string scheduler_algo_WRR                = "WRR";
-const string scheduler_algo_STRICT             = "STRICT";
-const string scheduler_weight_field_name       = "weight";
-const string scheduler_priority_field_name     = "priority";
+const string scheduler_algo_type_field_name     = "type";
+const string scheduler_algo_DWRR                = "DWRR";
+const string scheduler_algo_WRR                 = "WRR";
+const string scheduler_algo_STRICT              = "STRICT";
+const string scheduler_weight_field_name        = "weight";
+const string scheduler_priority_field_name      = "priority";
 
-const string ecn_field_name                    = "ecn";
-const string ecn_none                          = "ecn_none";
-const string ecn_red                           = "ecn_red";
-const string ecn_yellow                        = "ecn_yellow";
-const string ecn_yellow_red                    = "ecn_yellow_red";
-const string ecn_green                         = "ecn_green";
-const string ecn_green_red                     = "ecn_green_red";
-const string ecn_green_yellow                  = "ecn_green_yellow";
-const string ecn_all                           = "ecn_all";
+const string ecn_field_name                     = "ecn";
+const string ecn_none                           = "ecn_none";
+const string ecn_red                            = "ecn_red";
+const string ecn_yellow                         = "ecn_yellow";
+const string ecn_yellow_red                     = "ecn_yellow_red";
+const string ecn_green                          = "ecn_green";
+const string ecn_green_red                      = "ecn_green_red";
+const string ecn_green_yellow                   = "ecn_green_yellow";
+const string ecn_all                            = "ecn_all";
 
 class QosMapHandler
 {
@@ -132,6 +137,8 @@ private:
     task_process_status handleQueueTable(Consumer& consumer);
     task_process_status handleWredProfileTable(Consumer& consumer);
 
+    sai_object_id_t getSchedulerGroup(const Port &port, const sai_object_id_t queue_id);
+
     bool applyMapToPort(Port &port, sai_attr_id_t attr_id, sai_object_id_t sai_dscp_to_tc_map);
     bool applySchedulerToQueueSchedulerGroup(Port &port, size_t queue_ind, sai_object_id_t scheduler_profile_id);
     bool applyWredProfileToQueue(Port &port, size_t queue_ind, sai_object_id_t sai_wred_profile);
@@ -140,5 +147,13 @@ private:
 
 private:
     qos_table_handler_map m_qos_handler_map;
+
+    struct SchedulerGroupPortInfo_t
+    {
+        std::vector<sai_object_id_t> groups;
+        std::vector<std::vector<sai_object_id_t>> child_groups;
+    };
+
+    std::unordered_map<sai_object_id_t, SchedulerGroupPortInfo_t> m_scheduler_group_port_info;
 };
 #endif /* SWSS_QOSORCH_H */

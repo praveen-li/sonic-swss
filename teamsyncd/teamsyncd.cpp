@@ -34,8 +34,8 @@ int main(int argc, char **argv)
             while (true)
             {
                 Selectable *temps;
-                int tempfd;
-                s.select(&temps, &tempfd);
+                s.select(&temps, 1000); // block for a second
+                sync.periodic();
             }
         }
         catch (const std::exception& e)

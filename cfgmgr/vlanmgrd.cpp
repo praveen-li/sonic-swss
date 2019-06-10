@@ -13,6 +13,7 @@
 #include "producerstatetable.h"
 #include "vlanmgr.h"
 #include "shellcmd.h"
+#include "warm_restart.h"
 
 using namespace std;
 using namespace swss;
@@ -56,12 +57,15 @@ int main(int argc, char **argv)
         DBConnector appDb(APPL_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
         DBConnector stateDb(STATE_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
 
+        WarmStart::initialize("vlanmgrd", "swss");
+        WarmStart::checkWarmStart("vlanmgrd", "swss");
+
         /*
          * swss service starts after interfaces-config.service which will have
          * switch_mac set.
          * Dynamic switch_mac update is not supported for now.
          */
-        Table table(&cfgDb, "DEVICE_METADATA", CONFIGDB_TABLE_NAME_SEPARATOR);
+        Table table(&cfgDb, "DEVICE_METADATA");
         std::vector<FieldValueTuple> ovalues;
         table.get("localhost", ovalues);
         auto it = std::find_if( ovalues.begin(), ovalues.end(), [](const FieldValueTuple& t){ return t.first == "mac";} );
@@ -84,9 +88,9 @@ int main(int argc, char **argv)
         while (true)
         {
             Selectable *sel;
-            int fd, ret;
+            int ret;
 
-            ret = s.select(&sel, &fd, SELECT_TIMEOUT);
+            ret = s.select(&sel, SELECT_TIMEOUT);
             if (ret == Select::ERROR)
             {
                 SWSS_LOG_NOTICE("Error: %s!", strerror(errno));

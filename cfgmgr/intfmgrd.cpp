@@ -44,6 +44,7 @@ int main(int argc, char **argv)
             CFG_INTF_TABLE_NAME,
             CFG_LAG_INTF_TABLE_NAME,
             CFG_VLAN_INTF_TABLE_NAME,
+            CFG_LOOPBACK_INTERFACE_TABLE_NAME,
         };
 
         DBConnector cfgDb(CONFIG_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
@@ -65,9 +66,9 @@ int main(int argc, char **argv)
         while (true)
         {
             Selectable *sel;
-            int fd, ret;
+            int ret;
 
-            ret = s.select(&sel, &fd, SELECT_TIMEOUT);
+            ret = s.select(&sel, SELECT_TIMEOUT);
             if (ret == Select::ERROR)
             {
                 SWSS_LOG_NOTICE("Error: %s!", strerror(errno));

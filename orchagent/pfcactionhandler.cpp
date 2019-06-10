@@ -55,13 +55,27 @@ void PfcWdActionHandler::initCounters(void)
     }
 
     auto wdQueueStats = getQueueStats(m_countersTable, sai_serialize_object_id(m_queue));
-    wdQueueStats.detectCount++;
+    // initCounters() is called when the event channel receives
+    // a storm signal. This can happen when there is a true new storm or
+    // when there is an existing storm ongoing before warm-reboot. In the latter case,
+    // we treat the storm as an old storm. In particular,
+    // we do not increment the detectCount so as to clamp the
+    // gap between detectCount and restoreCount by 1 at maximum
+    if (!(wdQueueStats.detectCount > wdQueueStats.restoreCount))
+    {
+        wdQueueStats.detectCount++;
+
+        wdQueueStats.txPktLast = 0;
+        wdQueueStats.txDropPktLast = 0;
+        wdQueueStats.rxPktLast = 0;
+        wdQueueStats.rxDropPktLast = 0;
+    }
     wdQueueStats.operational = false;
 
     updateWdCounters(sai_serialize_object_id(m_queue), wdQueueStats);
 }
 
-void PfcWdActionHandler::commitCounters(void)
+void PfcWdActionHandler::commitCounters(bool periodic /* = false */)
 {
     SWSS_LOG_ENTER();
 
@@ -74,18 +88,23 @@ void PfcWdActionHandler::commitCounters(void)
 
     auto finalStats = getQueueStats(m_countersTable, sai_serialize_object_id(m_queue));
 
-    finalStats.restoreCount++;
-    finalStats.operational = true;
+    if (!periodic)
+    {
+        finalStats.restoreCount++;
+    }
+    finalStats.operational = !periodic;
 
-    finalStats.txPktLast = hwStats.txPkt - m_hwStats.txPkt;
-    finalStats.txDropPktLast = hwStats.txDropPkt - m_hwStats.txDropPkt;
-    finalStats.rxPktLast = hwStats.rxPkt - m_hwStats.rxPkt;
-    finalStats.rxDropPktLast = hwStats.rxDropPkt - m_hwStats.rxDropPkt;
+    finalStats.txPktLast += hwStats.txPkt - m_hwStats.txPkt;
+    finalStats.txDropPktLast += hwStats.txDropPkt - m_hwStats.txDropPkt;
+    finalStats.rxPktLast += hwStats.rxPkt - m_hwStats.rxPkt;
+    finalStats.rxDropPktLast += hwStats.rxDropPkt - m_hwStats.rxDropPkt;
 
-    finalStats.txPkt += finalStats.txPktLast;
-    finalStats.txDropPkt += finalStats.txDropPktLast;
-    finalStats.rxPkt += finalStats.rxPktLast;
-    finalStats.rxDropPkt += finalStats.rxDropPktLast;
+    finalStats.txPkt += hwStats.txPkt - m_hwStats.txPkt;
+    finalStats.txDropPkt += hwStats.txDropPkt - m_hwStats.txDropPkt;
+    finalStats.rxPkt += hwStats.rxPkt - m_hwStats.rxPkt;
+    finalStats.rxDropPkt += hwStats.rxDropPkt - m_hwStats.rxDropPkt;
+
+    m_hwStats = hwStats;
 
     updateWdCounters(sai_serialize_object_id(m_queue), finalStats);
 }
@@ -136,6 +155,22 @@ PfcWdActionHandler::PfcWdQueueStats PfcWdActionHandler::getQueueStats(shared_ptr
         else if (field == PFC_WD_QUEUE_STATS_RX_DROPPED_PACKETS)
         {
             stats.rxDropPkt = stoul(value);
+        }
+        else if (field == PFC_WD_QUEUE_STATS_TX_PACKETS_LAST)
+        {
+            stats.txPktLast = stoul(value);
+        }
+        else if (field == PFC_WD_QUEUE_STATS_TX_DROPPED_PACKETS_LAST)
+        {
+            stats.txDropPktLast = stoul(value);
+        }
+        else if (field == PFC_WD_QUEUE_STATS_RX_PACKETS_LAST)
+        {
+            stats.rxPktLast = stoul(value);
+        }
+        else if (field == PFC_WD_QUEUE_STATS_RX_DROPPED_PACKETS_LAST)
+        {
+            stats.rxDropPktLast = stoul(value);
         }
     }
 
@@ -295,23 +330,18 @@ PfcWdLossyHandler::PfcWdLossyHandler(sai_object_id_t port, sai_object_id_t queue
 {
     SWSS_LOG_ENTER();
 
-    sai_attribute_t attr;
-    attr.id = SAI_PORT_ATTR_PRIORITY_FLOW_CONTROL;
+    uint8_t pfcMask = 0;
 
-    sai_status_t status = sai_port_api->get_port_attribute(port, 1, &attr);
-    if (status != SAI_STATUS_SUCCESS)
+    if (!gPortsOrch->getPortPfc(port, &pfcMask))
     {
-        SWSS_LOG_ERROR("Failed to get PFC mask on port 0x%lx: %d", port, status);
+        SWSS_LOG_ERROR("Failed to get PFC mask on port 0x%lx", port);
     }
 
-    uint8_t pfcMask = attr.value.u8;
-    attr.id = SAI_PORT_ATTR_PRIORITY_FLOW_CONTROL;
-    attr.value.u8 = static_cast<uint8_t>(pfcMask & ~(1 << queueId));
+    pfcMask = static_cast<uint8_t>(pfcMask & ~(1 << queueId));
 
-    status = sai_port_api->set_port_attribute(port, &attr);
-    if (status != SAI_STATUS_SUCCESS)
+    if (!gPortsOrch->setPortPfc(port, pfcMask))
     {
-        SWSS_LOG_ERROR("Failed to get PFC mask on port 0x%lx: %d", port, status);
+        SWSS_LOG_ERROR("Failed to set PFC mask on port 0x%lx", port);
     }
 }
 
@@ -319,25 +349,18 @@ PfcWdLossyHandler::~PfcWdLossyHandler(void)
 {
     SWSS_LOG_ENTER();
 
-    sai_attribute_t attr;
-    attr.id = SAI_PORT_ATTR_PRIORITY_FLOW_CONTROL;
+    uint8_t pfcMask = 0;
 
-    sai_status_t status = sai_port_api->get_port_attribute(getPort(), 1, &attr);
-    if (status != SAI_STATUS_SUCCESS)
+    if (!gPortsOrch->getPortPfc(getPort(), &pfcMask))
     {
-        SWSS_LOG_ERROR("Failed to get PFC mask on port 0x%lx: %d", getPort(), status);
-        return;
+        SWSS_LOG_ERROR("Failed to get PFC mask on port 0x%lx", getPort());
     }
 
-    uint8_t pfcMask = attr.value.u8;
-    attr.id = SAI_PORT_ATTR_PRIORITY_FLOW_CONTROL;
-    attr.value.u8 = static_cast<uint8_t>(pfcMask | (1 << getQueueId()));
+    pfcMask = static_cast<uint8_t>(pfcMask | (1 << getQueueId()));
 
-    status = sai_port_api->set_port_attribute(getPort(), &attr);
-    if (status != SAI_STATUS_SUCCESS)
+    if (!gPortsOrch->setPortPfc(getPort(), pfcMask))
     {
-        SWSS_LOG_ERROR("Failed to set PFC mask on port 0x%lx: %d", getPort(), status);
-        return;
+        SWSS_LOG_ERROR("Failed to set PFC mask on port 0x%lx", getPort());
     }
 }
 
@@ -593,7 +616,7 @@ void PfcWdZeroBufferHandler::ZeroBufferProfile::createZeroBufferProfile(bool ing
     attribs.push_back(attr);
 
     attr.id = SAI_BUFFER_PROFILE_ATTR_SHARED_DYNAMIC_TH;
-    attr.value.u32 = -8; // ALPHA_0
+    attr.value.s8 = -8; // ALPHA_0
     attribs.push_back(attr);
 
     status = sai_buffer_api->create_buffer_profile(

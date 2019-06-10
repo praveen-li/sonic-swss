@@ -15,29 +15,26 @@ import os
 
 class TestSpeedSet(object):
     num_ports = 32
-    def test_SpeedAndBufferSet(self, dvs):
+    def test_SpeedAndBufferSet(self, dvs, testlog):
         speed_list = ['50000', '25000', '40000', '10000', '100000']
 
         cdb = swsscommon.DBConnector(4, dvs.redis_sock, 0)
         adb = swsscommon.DBConnector(1, dvs.redis_sock, 0)
-        cfg_port_table = swsscommon.Table(cdb, "PORT", '|')
-        cfg_buffer_profile_table = swsscommon.Table(cdb, "BUFFER_PROFILE", '|')
-        cfg_buffer_pg_table = swsscommon.Table(cdb, "BUFFER_PG", '|')
+        cfg_port_table = swsscommon.Table(cdb, "PORT")
+        cfg_buffer_profile_table = swsscommon.Table(cdb, "BUFFER_PROFILE")
+        cfg_buffer_pg_table = swsscommon.Table(cdb, "BUFFER_PG")
         asic_port_table = swsscommon.Table(adb, "ASIC_STATE:SAI_OBJECT_TYPE_PORT")
         asic_profile_table = swsscommon.Table(adb, "ASIC_STATE:SAI_OBJECT_TYPE_BUFFER_PROFILE")
 
         buffer_profiles = cfg_buffer_profile_table.getKeys()
         expected_buffer_profiles_num = len(buffer_profiles)
-        # buffers.json used for the test defines 7 static profiles:
+        # buffers.json used for the test defines 4 static profiles:
         #    "ingress_lossless_profile"
         #    "ingress_lossy_profile"
         #    "egress_lossless_profile"
         #    "egress_lossy_profile"
-        #    "pg_lossy_profile"
-        #    "q_lossless_profile"
-        #    "q_lossy_profile"
         # check if they get the DB
-        assert expected_buffer_profiles_num == 7
+        assert expected_buffer_profiles_num == 4
         # and if they were successfully created on ASIC
         assert len(asic_profile_table.getKeys()) == expected_buffer_profiles_num
 

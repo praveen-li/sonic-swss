@@ -9,9 +9,23 @@
         "OP": "SET"
     },
     {
-        "COPP_TABLE:trap.group.arp.dhcp": {
-            "trap_ids": "arp_req,arp_resp,neigh_discovery,dhcp,dhcpv6",
+        "COPP_TABLE:trap.group.dhcp": {
+            "trap_ids": "dhcp,dhcpv6",
             "trap_action":"trap",
+            "trap_priority":"4",
+            "queue": "4",
+            "meter_type":"packets",
+            "mode":"sr_tcm",
+            "cir":"600",
+            "cbs":"600",
+            "red_action":"drop"
+        },
+        "OP": "SET"
+    },
+    {
+        "COPP_TABLE:trap.group.arp": {
+            "trap_ids": "arp_req,arp_resp,neigh_discovery",
+            "trap_action":"copy",
             "trap_priority":"4",
             "queue": "4",
             "meter_type":"packets",
