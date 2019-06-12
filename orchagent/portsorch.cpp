@@ -42,18 +42,10 @@ extern BufferOrch *gBufferOrch;
 #define VLAN_PREFIX         "Vlan"
 #define DEFAULT_VLAN_ID     1
 #define PORT_FLEX_STAT_COUNTER_POLL_MSECS "1000"
-<<<<<<< HEAD
-
-/* queue polling thread interval is set to 10 seconds */
-#define QUEUE_FLEX_STAT_COUNTER_POLL_MSECS "10000"
-#define PORT_STAT_COUNTER_FLEX_COUNTER_GROUP "PORT_STAT_COUNTER"
-#define QUEUE_STAT_COUNTER_FLEX_COUNTER_GROUP "QUEUE_STAT_COUNTER"
-=======
 #define QUEUE_FLEX_STAT_COUNTER_POLL_MSECS "10000"
 #define QUEUE_WATERMARK_FLEX_STAT_COUNTER_POLL_MSECS "10000"
 #define PG_WATERMARK_FLEX_STAT_COUNTER_POLL_MSECS "10000"
 
->>>>>>> github-201811
 
 static map<string, sai_port_fec_mode_t> fec_mode_map =
 {
@@ -117,8 +109,6 @@ static const vector<sai_queue_stat_t> queueStatIds =
     SAI_QUEUE_STAT_BYTES,
     SAI_QUEUE_STAT_DROPPED_PACKETS,
     SAI_QUEUE_STAT_DROPPED_BYTES,
-<<<<<<< HEAD
-=======
 };
 
 static const vector<sai_queue_stat_t> queueWatermarkStatIds =
@@ -130,7 +120,6 @@ static const vector<sai_ingress_priority_group_stat_t> ingressPriorityGroupWater
 {
     SAI_INGRESS_PRIORITY_GROUP_STAT_XOFF_ROOM_WATERMARK_BYTES,
     SAI_INGRESS_PRIORITY_GROUP_STAT_SHARED_WATERMARK_BYTES,
->>>>>>> github-201811
 };
 
 static char* hostif_vlan_tag[] = {
@@ -180,12 +169,6 @@ PortsOrch::PortsOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames)
 
     vector<FieldValueTuple> fields;
     fields.emplace_back(POLL_INTERVAL_FIELD, PORT_FLEX_STAT_COUNTER_POLL_MSECS);
-<<<<<<< HEAD
-    m_flexCounterGroupTable->set(PORT_STAT_COUNTER_FLEX_COUNTER_GROUP, fields);
-
-    fields.emplace_back(POLL_INTERVAL_FIELD, QUEUE_FLEX_STAT_COUNTER_POLL_MSECS);
-    m_flexCounterGroupTable->set(QUEUE_STAT_COUNTER_FLEX_COUNTER_GROUP, fields);
-=======
     fields.emplace_back(STATS_MODE_FIELD, STATS_MODE_READ);
     m_flexCounterGroupTable->set(PORT_STAT_COUNTER_FLEX_COUNTER_GROUP, fields);
 
@@ -221,7 +204,6 @@ PortsOrch::PortsOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames)
     {
         SWSS_LOG_WARN("Watermark flex counter groups were not set successfully");
     }
->>>>>>> github-201811
 
     uint32_t i, j;
     sai_status_t status;
@@ -1235,8 +1217,7 @@ bool PortsOrch::setPortAutoNeg(sai_object_id_t id, int an)
     return true;
 }
 
-<<<<<<< HEAD
-void PortsOrch::updateDbPortFlapCounter(const string &alias, vector<FieldValueTuple>& old_tuples, vector<FieldValueTuple>& new_tuples)
+void PortsOrch::updateDbPortFlapCounter(const string &alias, vector<FieldValueTuple>& old_tuples, vector<FieldValueTuple>& new_tuples) const
 {
     SWSS_LOG_ENTER();
 
@@ -1272,7 +1253,7 @@ void PortsOrch::updateDbPortFlapCounter(const string &alias, vector<FieldValueTu
     new_tuples.push_back(flap_tuple);
 }
 
-void PortsOrch::updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples)
+void PortsOrch::updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples) const
 {
     SWSS_LOG_ENTER();
 
@@ -1286,10 +1267,26 @@ void PortsOrch::updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples)
     new_tuples.push_back(tuple);
 }
 
-void PortsOrch::updateDbPortStatus(sai_object_id_t id, sai_port_oper_status_t status)
-=======
+void PortsOrch::updateDbPortStatus(const Port& port, sai_port_oper_status_t status) const
+{
+    SWSS_LOG_ENTER();
+
+    vector<FieldValueTuple> old_tuples;
+    vector<FieldValueTuple> new_tuples;
+
+    bool exist = m_portTable->get(port.m_alias, old_tuples);
+    if (!exist)
+    {
+        return;
+    }
+    updateDbPortLastFlapTime(new_tuples);
+    updateDbPortFlapCounter(port.m_alias, old_tuples, new_tuples);
+    FieldValueTuple tuple("oper_status", oper_status_strings.at(status));
+    new_tuples.push_back(tuple);
+    m_portTable->set(port.m_alias, new_tuples);
+}
+
 bool PortsOrch::setHostIntfsOperStatus(const Port& port, bool isUp) const
->>>>>>> github-201811
 {
     SWSS_LOG_ENTER();
 
@@ -1300,44 +1297,15 @@ bool PortsOrch::setHostIntfsOperStatus(const Port& port, bool isUp) const
     sai_status_t status = sai_hostif_api->set_hostif_attribute(port.m_hif_id, &attr);
     if (status != SAI_STATUS_SUCCESS)
     {
-<<<<<<< HEAD
-        if (it->second.m_port_id == id)
-        {
-            vector<FieldValueTuple> old_tuples;
-            vector<FieldValueTuple> new_tuples;
-
-            bool exist = m_portTable->get(it->first, old_tuples);
-            if (!exist)
-            {
-              return;
-            }
-            updateDbPortLastFlapTime(new_tuples);
-            updateDbPortFlapCounter(it->first, old_tuples, new_tuples);
-            FieldValueTuple tuple("oper_status", oper_status_strings.at(status));
-            new_tuples.push_back(tuple);
-            m_portTable->set(it->first, new_tuples);
-        }
-=======
         SWSS_LOG_WARN("Failed to set operation status %s to host interface %s",
                 isUp ? "UP" : "DOWN", port.m_alias.c_str());
         return false;
->>>>>>> github-201811
     }
 
     SWSS_LOG_NOTICE("Set operation status %s to host interface %s",
             isUp ? "UP" : "DOWN", port.m_alias.c_str());
 
     return true;
-}
-
-void PortsOrch::updateDbPortOperStatus(const Port& port, sai_port_oper_status_t status) const
-{
-    SWSS_LOG_ENTER();
-
-    vector<FieldValueTuple> tuples;
-    FieldValueTuple tuple("oper_status", oper_status_strings.at(status));
-    tuples.push_back(tuple);
-    m_portTable->set(port.m_alias, tuples);
 }
 
 bool PortsOrch::addPort(const set<int> &lane_set, uint32_t speed, int an, string fec_mode)
@@ -1418,8 +1386,6 @@ string PortsOrch::getPortFlexCounterTableKey(string key)
 string PortsOrch::getQueueFlexCounterTableKey(string key)
 {
     return string(QUEUE_STAT_COUNTER_FLEX_COUNTER_GROUP) + ":" + key;
-<<<<<<< HEAD
-=======
 }
 
 string PortsOrch::getQueueWatermarkFlexCounterTableKey(string key)
@@ -1430,7 +1396,6 @@ string PortsOrch::getQueueWatermarkFlexCounterTableKey(string key)
 string PortsOrch::getPriorityGroupWatermarkFlexCounterTableKey(string key)
 {
     return string(PG_WATERMARK_STAT_COUNTER_FLEX_COUNTER_GROUP) + ":" + key;
->>>>>>> github-201811
 }
 
 bool PortsOrch::initPort(const string &alias, const set<int> &lane_set)
@@ -2446,64 +2411,6 @@ void PortsOrch::initializeQueues(Port &port)
     }
 
     SWSS_LOG_INFO("Get queues for port %s", port.m_alias.c_str());
-<<<<<<< HEAD
-
-    /* Create the Queue map in the Counter DB */
-    /* Add stat counters to flex_counter */
-    vector<FieldValueTuple> queueVector;
-    vector<FieldValueTuple> queuePortVector;
-    vector<FieldValueTuple> queueIndexVector;
-    vector<FieldValueTuple> queueTypeVector;
-
-    for (size_t queueIndex = 0; queueIndex < port.m_queue_ids.size(); ++queueIndex)
-    {
-        std::ostringstream name;
-        name << port.m_alias << ":" << queueIndex;
-        FieldValueTuple tuple(name.str(), sai_serialize_object_id(port.m_queue_ids[queueIndex]));
-        queueVector.push_back(tuple);
-
-        FieldValueTuple queuePortTuple(
-                sai_serialize_object_id(port.m_queue_ids[queueIndex]),
-                sai_serialize_object_id(port.m_port_id));
-        queuePortVector.push_back(queuePortTuple);
-
-        FieldValueTuple queueIndexTuple(
-                sai_serialize_object_id(port.m_queue_ids[queueIndex]),
-                to_string(queueIndex));
-        queueIndexVector.push_back(queueIndexTuple);
-
-
-        string queueType;
-        if (getQueueType(port.m_queue_ids[queueIndex], queueType))
-        {
-            FieldValueTuple queueTypeTuple(
-                    sai_serialize_object_id(port.m_queue_ids[queueIndex]),
-                    queueType);
-            queueTypeVector.push_back(queueTypeTuple);
-        }
-
-        string key = getQueueFlexCounterTableKey(sai_serialize_object_id(port.m_queue_ids[queueIndex]));
-
-        std::string delimiter = "";
-        std::ostringstream counters_stream;
-        for (auto it = queueStatIds.begin(); it != queueStatIds.end(); it++)
-        {
-            counters_stream << delimiter << sai_serialize_queue_stat(*it);
-            delimiter = ",";
-        }
-
-        vector<FieldValueTuple> fieldValues;
-        fieldValues.emplace_back(QUEUE_COUNTER_ID_LIST, counters_stream.str());
-
-        m_flexCounterTable->set(key, fieldValues);
-    }
-
-    m_queueTable->set("", queueVector);
-    m_queuePortTable->set("", queuePortVector);
-    m_queueIndexTable->set("", queueIndexVector);
-    m_queueTypeTable->set("", queueTypeVector);
-=======
->>>>>>> github-201811
 }
 
 void PortsOrch::initializePriorityGroups(Port &port)
@@ -2576,16 +2483,12 @@ bool PortsOrch::initializePort(Port &port)
      * Create database port oper status as DOWN if attr missing
      * This status will be updated upon receiving port_oper_status_notification.
      */
-<<<<<<< HEAD
     vector<FieldValueTuple> vector;
-    FieldValueTuple tuple("oper_status", "down");
-    vector.push_back(tuple);
     FieldValueTuple flap_tuple("flap_counter", "0");
     vector.push_back(flap_tuple);
     FieldValueTuple last_flap("last_flap", "N/A");
     vector.push_back(last_flap);
-    m_portTable->set(p.m_alias, vector);
-=======
+    m_portTable->set(port.m_alias, vector);
     if (operStatus == "up")
     {
         port.m_oper_status = SAI_PORT_OPER_STATUS_UP;
@@ -2607,7 +2510,6 @@ bool PortsOrch::initializePort(Port &port)
         SWSS_LOG_ERROR("Failed to get initial port admin status %s", port.m_alias.c_str());
         return false;
     }
->>>>>>> github-201811
 
     /* initialize port admin speed */
     if (!getPortSpeed(port.m_port_id, port.m_speed))
@@ -3348,7 +3250,7 @@ void PortsOrch::updatePortOperStatus(Port &port, sai_port_oper_status_t status)
         return ;
     }
 
-    updateDbPortOperStatus(port, status);
+    updateDbPortStatus(port, status);
     port.m_oper_status = status;
 
     bool isUp = status == SAI_PORT_OPER_STATUS_UP;

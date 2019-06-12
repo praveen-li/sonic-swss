@@ -72,7 +72,7 @@ public:
     bool getAclBindPortId(string alias, sai_object_id_t &port_id);
 
     bool setHostIntfsOperStatus(const Port& port, bool up) const;
-    void updateDbPortOperStatus(const Port& port, sai_port_oper_status_t status) const;
+    void updateDbPortStatus(const Port& port, sai_port_oper_status_t status) const;
     bool createBindAclTableGroup(sai_object_id_t id, sai_object_id_t &group_oid, acl_stage_type_t acl_stage = ACL_STAGE_EGRESS);
     bool bindAclTable(sai_object_id_t id, sai_object_id_t table_oid, sai_object_id_t &group_member_oid, acl_stage_type_t acl_stage = ACL_STAGE_INGRESS);
 
@@ -189,6 +189,8 @@ private:
 
     bool getPortOperStatus(const Port& port, sai_port_oper_status_t& status) const;
     void updatePortOperStatus(Port &port, sai_port_oper_status_t status);
+    void updateDbPortFlapCounter(const string &alias, vector<FieldValueTuple>& old_tuples, vector<FieldValueTuple>& new_tuples) const;
+    void updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples) const;
 };
 #endif /* SWSS_PORTSORCH_H */
 

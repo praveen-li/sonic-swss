@@ -17,6 +17,7 @@ using namespace swss;
 #define DEFAULT_VLAN_ID     "1"
 #define DEFAULT_MTU_STR     "9100"
 #define VLAN_HLEN            4
+#define DUMMY_INTF_NAME     "dummy"
 
 extern MacAddress gMacAddress;
 
