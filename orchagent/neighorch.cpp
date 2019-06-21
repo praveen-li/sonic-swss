@@ -9,9 +9,9 @@ extern sai_neighbor_api_t*         sai_neighbor_api;
 extern sai_next_hop_api_t*         sai_next_hop_api;
 
 extern PortsOrch *gPortsOrch;
-extern RouteOrch *gRouteOrch;
 extern sai_object_id_t gSwitchId;
 extern CrmOrch *gCrmOrch;
+extern RouteOrch *gRouteOrch;
 
 const int neighorch_pri = 30;
 
@@ -320,23 +320,6 @@ void NeighOrch::doTask(Consumer &consumer)
         }
 
         IpAddress ip_address(key.substr(found+1));
-
-        /*
-         * When dealing with link-scope addresses we will not create nor remove
-         * neighbor-entries. This is motivated by a few SAI implementation
-         * constrains, that prevent the creation of more than one host-route to
-         * the same neighbor ip-address through different intfs. This if-statement
-         * should be eliminated the moment these issues are fixed at SAI level.
-         */
-        if (ip_address.getAddrScope() == IpAddress::AddrScope::LINK_SCOPE)
-        {
-            SWSS_LOG_DEBUG("Skipping adding/removing neighbor entries for "
-                           "link-local neighbor %s on intf %s",
-                           ip_address.to_string().c_str(),
-                           alias.c_str());
-            it = consumer.m_toSync.erase(it);
-            continue;
-        }
 
         NeighborEntry neighbor_entry = { ip_address, alias };
 
