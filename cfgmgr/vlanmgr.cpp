@@ -176,10 +176,12 @@ bool VlanMgr::addHostVlanMember(int vlan_id, const string &port_alias, const str
 
     // The command should be generated as:
     // /bin/bash -c "/sbin/ip link set {{port_alias}} master Bridge &&
+    //               /sbin/bridge vlan del vid 1 dev {{ port_alias }} &&
     //               /sbin/bridge vlan add vid {{vlan_id}} dev {{port_alias}} {{tagging_mode}}"
     const std::string cmds = std::string("")
       + BASH_CMD + " -c \""
       + IP_CMD + " link set " + port_alias + " master " + DOT1Q_BRIDGE_NAME + " && "
+      + BRIDGE_CMD + " vlan del vid " + DEFAULT_VLAN_ID + " dev " + port_alias + " && "
       + BRIDGE_CMD + " vlan add vid " + std::to_string(vlan_id) + " dev " + port_alias + " " + tagging_cmd + "\"";
 
     std::string res;
@@ -258,11 +260,14 @@ void VlanMgr::doVlanTask(Consumer &consumer)
             string members;
 
             /*
-             * Don't program vlan again if state is already set.
-             * will hit this for docker warm restart.
-             * Just set the internal data structure and remove the request.
+             * If state is already set for this vlan, but it doesn't exist in m_vlans set,
+             * just add it to m_vlans set and remove the request to skip disrupting Linux vlan.
+             * Will hit this scenario for docker warm restart.
+             *
+             * Otherwise, it is new VLAN create or VLAN attribute update like admin_status/mtu change,
+             * proceed with regular processing.
              */
-            if (isVlanStateOk(key))
+            if (isVlanStateOk(key) && m_vlans.find(key) == m_vlans.end())
             {
                 m_vlans.insert(key);
                 it = consumer.m_toSync.erase(it);

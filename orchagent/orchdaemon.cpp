@@ -122,7 +122,7 @@ bool OrchDaemon::init()
 
     PolicerOrch *policer_orch = new PolicerOrch(m_configDb, "POLICER");
 
-    TableConnector stateDbMirrorSession(m_stateDb, APP_MIRROR_SESSION_TABLE_NAME);
+    TableConnector stateDbMirrorSession(m_stateDb, STATE_MIRROR_SESSION_TABLE_NAME);
     TableConnector confDbMirrorSession(m_configDb, CFG_MIRROR_SESSION_TABLE_NAME);
     MirrorOrch *mirror_orch = new MirrorOrch(stateDbMirrorSession, confDbMirrorSession, gPortsOrch, gRouteOrch, gNeighOrch, gFdbOrch, policer_orch);
 
@@ -215,7 +215,7 @@ bool OrchDaemon::init()
         CFG_PFC_WD_TABLE_NAME
     };
 
-    if ((platform == MLNX_PLATFORM_SUBSTRING) || (platform == BFN_PLATFORM_SUBSTRING))
+    if ((platform == MLNX_PLATFORM_SUBSTRING) || (platform == INVM_PLATFORM_SUBSTRING) || (platform == BFN_PLATFORM_SUBSTRING))
     {
 
         static const vector<sai_port_stat_t> portStatIds =
@@ -246,7 +246,7 @@ bool OrchDaemon::init()
 
         static const vector<sai_queue_attr_t> queueAttrIds;
 
-        if (platform == MLNX_PLATFORM_SUBSTRING)
+        if ((platform == MLNX_PLATFORM_SUBSTRING) || (platform == INVM_PLATFORM_SUBSTRING))
         {
             m_orchList.push_back(new PfcWdSwOrch<PfcWdZeroBufferHandler, PfcWdLossyHandler>(
                         m_configDb,
@@ -444,12 +444,20 @@ bool OrchDaemon::warmRestoreAndSyncUp()
      * Fourth iteration: Drain remaining data that are out of order like LAG_MEMBER_TABLE and
      * VLAN_MEMBER_TABLE since they were checked before LAG_TABLE and VLAN_TABLE within gPortsOrch.
      */
+
     for (auto it = 0; it < 4; it++)
     {
+        SWSS_LOG_DEBUG("The current iteration is %d", it);
+
         for (Orch *o : m_orchList)
         {
             o->doTask();
         }
+    }
+
+    for (Orch *o : m_orchList)
+    {
+        o->postBake();
     }
 
     /*

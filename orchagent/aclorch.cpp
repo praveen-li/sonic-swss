@@ -1135,7 +1135,7 @@ void AclRuleMirror::update(SubjectType type, void *cntx)
     else
     {
         // Store counters before deactivating ACL rule
-        counters += getCounters();
+        counters += AclRule::getCounters();
 
         SWSS_LOG_INFO("Deactivating mirroring ACL %s for session %s", m_id.c_str(), m_sessionName.c_str());
         remove();
@@ -2706,7 +2706,8 @@ void AclOrch::doTask(SelectableTimer &timer)
             swss::FieldValueTuple fvtb("Bytes", to_string(cnt.bytes));
             values.push_back(fvtb);
 
-            AclOrch::getCountersTable().set(table_it.second.id + ":" + rule_it.second->getId(), values, "");
+            AclOrch::getCountersTable().set(rule_it.second->getTableId() + ":"
+                    + rule_it.second->getId(), values, "");
         }
         values.clear();
     }
