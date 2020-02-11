@@ -213,21 +213,16 @@ bool IntfMgr::doIntfAddrTask(const vector<string>& keys,
         std::vector<FieldValueTuple> fvVector;
         FieldValueTuple f("family", ip_prefix.isV4() ? IPV4_NAME : IPV6_NAME);
 
-        if (ip_prefix.getIp().getAddrScope() == IpAddress::AddrScope::LINK_SCOPE)
-        {
-            FieldValueTuple s("scope", "local");
-            fvVector.push_back(s);
-        }
-        else
+        // Don't send link local config to AppDB and Orchagent
+        if (ip_prefix.getIp().getAddrScope() != IpAddress::AddrScope::LINK_SCOPE)
         {
             FieldValueTuple s("scope", "global");
             fvVector.push_back(s);
+            fvVector.push_back(f);
+
+            m_appIntfTableProducer.set(appKey, fvVector);
+            m_stateIntfTable.hset(keys[0] + state_db_key_delimiter + keys[1], "state", "ok");
         }
-
-        fvVector.push_back(f);
-
-        m_appIntfTableProducer.set(appKey, fvVector);
-        m_stateIntfTable.hset(keys[0] + state_db_key_delimiter + keys[1], "state", "ok");
     }
     else if (op == DEL_COMMAND)
     {
@@ -236,8 +231,13 @@ bool IntfMgr::doIntfAddrTask(const vector<string>& keys,
         {
             setIntfIp(alias, "del", ip_prefix);
         }
-        m_appIntfTableProducer.del(appKey);
-        m_stateIntfTable.del(keys[0] + state_db_key_delimiter + keys[1]);
+
+        // Don't send link local config to AppDB and Orchagent
+        if (ip_prefix.getIp().getAddrScope() != IpAddress::AddrScope::LINK_SCOPE)
+        {
+            m_appIntfTableProducer.del(appKey);
+            m_stateIntfTable.del(keys[0] + state_db_key_delimiter + keys[1]);
+        }
     }
     else
     {
