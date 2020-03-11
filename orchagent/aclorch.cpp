@@ -191,6 +191,13 @@ bool AclRule::validateAddMatch(string attr_name, string attr_value)
                     SWSS_LOG_ERROR("Failed to locate port %s", alias.c_str());
                     return false;
                 }
+
+                if (port.m_type != Port::PHY)
+                {
+                    SWSS_LOG_ERROR("Cannot bind rule to %s: IN_PORTS can only match physical interfaces", alias.c_str());
+                    return false;
+                }
+
                 m_inPorts.push_back(port.m_port_id);
             }
 
@@ -215,6 +222,13 @@ bool AclRule::validateAddMatch(string attr_name, string attr_value)
                     SWSS_LOG_ERROR("Failed to locate port %s", alias.c_str());
                     return false;
                 }
+
+                if (port.m_type != Port::PHY)
+                {
+                    SWSS_LOG_ERROR("Cannot bind rule to %s: OUT_PORTS can only match physical interfaces", alias.c_str());
+                    return false;
+                }
+
                 m_outPorts.push_back(port.m_port_id);
             }
 
@@ -1258,6 +1272,8 @@ bool AclTable::create()
      * |------------------------------------------------------------------|
      * | MARTCH_ETHERTYPE  |      √       |      √       |                |
      * |------------------------------------------------------------------|
+     * | MATCH_IN_PORTS    |      √       |      √       |                |
+     * |------------------------------------------------------------------|
      */
 
     if (type == ACL_TABLE_MIRROR)
@@ -1275,6 +1291,10 @@ bool AclTable::create()
         table_attrs.push_back(attr);
 
         attr.id = SAI_ACL_TABLE_ATTR_FIELD_ICMP_CODE;
+        attr.value.booldata = true;
+        table_attrs.push_back(attr);
+
+        attr.id = SAI_ACL_TABLE_ATTR_FIELD_IN_PORTS;
         attr.value.booldata = true;
         table_attrs.push_back(attr);
 
