@@ -86,19 +86,6 @@ bool NbrMgr::isNeighRestoreDone()
     return false;
 }
 
-bool NbrMgr::isNeighRestoreDone()
-{
-    string value;
-
-    m_stateNeighRestoreTable.hget("Flags", "restored", value);
-    if (value == "true")
-    {
-        SWSS_LOG_INFO("Kernel neighbor table restore is done");
-        return true;
-    }
-    return false;
-}
-
 bool NbrMgr::setNeighbor(const string& alias, const IpAddress& ip, const MacAddress& mac)
 {
     SWSS_LOG_ENTER();
