@@ -16,7 +16,7 @@ import os
 class TestSpeedSet(object):
     num_ports = 32
     def test_SpeedAndBufferSet(self, dvs, testlog):
-        configured_speed_list = ['40000']
+        configured_speed_list = []
         speed_list = ['10000', '25000', '40000', '50000', '100000']
 
         cdb = swsscommon.DBConnector(4, dvs.redis_sock, 0)
@@ -27,13 +27,28 @@ class TestSpeedSet(object):
         asic_port_table = swsscommon.Table(adb, "ASIC_STATE:SAI_OBJECT_TYPE_PORT")
         asic_profile_table = swsscommon.Table(adb, "ASIC_STATE:SAI_OBJECT_TYPE_BUFFER_PROFILE")
 
+        # Get speed from the first port we hit in ASIC DB port walk, and
+        # assume that its the initial configured speed for all ports, and
+        # dynamic buffer profile has already been created for it.
+        asic_port_records = asic_port_table.getKeys()
+        for k in asic_port_records:
+            (status, fvs) = asic_port_table.get(k)
+            assert status == True
+            for fv in fvs:
+                if fv[0] == "SAI_PORT_ATTR_SPEED":
+                    configured_speed_list.append(fv[1])
+                    break
+
+            if len(configured_speed_list):
+                break;
+
         buffer_profiles = cfg_buffer_profile_table.getKeys()
         expected_buffer_profiles_num = len(buffer_profiles)
         # buffers_config.j2 used for the test defines 3 static profiles and 1 dynamic profiles:
         #    "ingress_lossy_profile"
         #    "egress_lossless_profile"
         #    "egress_lossy_profile"
-        #    "pg_lossless_40000_300m_profile"
+        #    "pg_lossless_<initial_speed>_300m_profile"
         # check if they get the DB
         assert expected_buffer_profiles_num == 4
         # and if they were successfully created on ASIC

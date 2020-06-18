@@ -56,7 +56,7 @@ IntfsOrch::IntfsOrch(DBConnector *db, string tableName, VRFOrch *vrf_orch) :
 {
     SWSS_LOG_ENTER();
 
-    /* Initialize DB connectors */ 
+    /* Initialize DB connectors */
     m_counter_db = shared_ptr<DBConnector>(new DBConnector("COUNTERS_DB", 0));
     m_flex_db = shared_ptr<DBConnector>(new DBConnector("FLEX_COUNTER_DB", 0));
     m_asic_db = shared_ptr<DBConnector>(new DBConnector("ASIC_DB", 0));
@@ -522,9 +522,6 @@ void IntfsOrch::doTask(Consumer &consumer)
         }
 
         string op = kfvOp(t);
-
-	SWSS_LOG_DEBUG("Interface %s ip %s request with type %s is received",
-	  alias.c_str(), ip_prefix.to_string().c_str(), op.c_str());
 
         if (op == SET_COMMAND)
         {

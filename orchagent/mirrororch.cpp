@@ -123,7 +123,7 @@ bool MirrorOrch::bake()
                     key, monitor_port + state_db_key_delimiter + next_hop_ip);
         }
 
-	removeSessionState(key);
+        removeSessionState(key);
     }
 
     return Orch::bake();

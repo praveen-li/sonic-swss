@@ -141,7 +141,7 @@ def test_FDBAddedAndUpdated(dvs, testlog):
 
     # Get mapping between interface name and its bridge port_id
     iface_2_bridge_port_id = dvs.get_map_iface_bridge_port_id(dvs.adb)
-    
+
     ok, extra = dvs.is_fdb_entry_exists(dvs.adb, "ASIC_STATE:SAI_OBJECT_TYPE_FDB_ENTRY",
                     [("mac", "52:54:00:25:06:E9"), ("bvid", bvid)],
                     [("SAI_FDB_ENTRY_ATTR_TYPE", "SAI_FDB_ENTRY_TYPE_DYNAMIC"),
@@ -199,6 +199,7 @@ def test_FDBLearnedAndUpdated(dvs, testlog):
     dvs.servers[16].runcmd("ifconfig eth0 hw ether 00:00:00:00:00:11")
     dvs.servers[16].runcmd("ifconfig eth0 6.6.6.6/24 up")
     dvs.servers[16].runcmd("ip route add default via 6.6.6.1")
+    dvs.servers[17].runcmd("ifconfig eth0 hw ether 00:00:00:00:17:11")
     dvs.servers[17].runcmd("ifconfig eth0 6.6.6.7/24 up")
     dvs.servers[17].runcmd("ip route add default via 6.6.6.1")
     time.sleep(2)
@@ -239,9 +240,10 @@ def test_FDBLearnedAndUpdated(dvs, testlog):
 
     # restore the default value of the servers
     dvs.servers[16].runcmd("ip route del default via 6.6.6.1")
-    dvs.servers[16].runcmd("ifconfig eth0 0")
+    dvs.servers[16].runcmd("ifconfig eth0 0 down")
     dvs.servers[17].runcmd("ip route del default via 6.6.6.1")
-    dvs.servers[17].runcmd("ifconfig eth0 0")
+    dvs.servers[17].runcmd("ifconfig eth0 0 down")
+    dvs.servers[18].runcmd("ifconfig eth0 0 down")
 
     # bring down port
     dvs.set_interface_status("Ethernet64", "down")
@@ -249,8 +251,7 @@ def test_FDBLearnedAndUpdated(dvs, testlog):
     dvs.set_interface_status("Ethernet72", "down")
 
     # remove vlan ip
-    key = "Vlan6" + "|" + "6.6.6.1/24"
-    remove_entry_tbl(dvs.cdb, "VLAN_INTERFACE", key)
+    dvs.remove_ip_address("Vlan6", "7.7.7.1/24")
 
     # bring down vlan
     dvs.set_interface_status("Vlan6", "down")
@@ -263,3 +264,62 @@ def test_FDBLearnedAndUpdated(dvs, testlog):
 
     # clear fdb
     dvs.runcmd("sonic-clear fdb all")
+
+
+def test_FDBLearnedAndFlushed(dvs, testlog):
+    dvs.setup_db()
+
+    dvs.runcmd("sonic-clear fdb all")
+
+    VLAN = "9"
+    VLAN_NAME = "Vlan9"
+    PORT = "Ethernet80"
+    server = 20
+    server_mac = "00:00:00:00:20:11"
+
+    # create vlan; create vlan member
+    dvs.create_vlan(VLAN)
+    dvs.create_vlan_member(VLAN, PORT)
+    time.sleep(2)
+
+    # Get mapping between interface name and its bridge port_id
+    iface_2_bridge_port_id = dvs.get_map_iface_bridge_port_id(dvs.adb)
+
+    # bring up vlan and member
+    dvs.set_interface_status(VLAN_NAME, "up")
+    dvs.add_ip_address(VLAN_NAME, "7.7.7.1/24")
+    dvs.set_interface_status(PORT, "up")
+
+    dvs.servers[server].runcmd("ifconfig eth0 hw ether {}".format(server_mac))
+    dvs.servers[server].runcmd("ifconfig eth0 7.7.7.7/24 up")
+
+    # get neighbor and arp entry
+    rc = dvs.servers[server].runcmd("ping -c 1 7.7.7.1")
+    assert rc == 0
+    time.sleep(2)
+
+    # check that the FDB entries were inserted into ASIC DB
+    mac = get_mac_by_bridge_id(dvs, iface_2_bridge_port_id[PORT])
+    assert server_mac in mac
+
+    # bring down port
+    dvs.servers[server].runcmd("ip link set down dev eth0") == 0
+    #dvs.set_interface_status(PORT, "down")
+    time.sleep(2)
+
+    # fdb should be flushed
+    mac = get_mac_by_bridge_id(dvs, iface_2_bridge_port_id[PORT])
+    assert not mac
+
+    # remove vlan ip
+    dvs.remove_ip_address(VLAN_NAME, "7.7.7.1/24")
+
+    # bring down vlan
+    dvs.set_interface_status(VLAN_NAME, "down")
+
+    # remove vlan member; remove vlan
+    dvs.remove_vlan_member(VLAN, PORT)
+    dvs.remove_vlan(VLAN)
+
+    # restore the default value of the servers
+    dvs.servers[server].runcmd("ifconfig eth0 0 down")

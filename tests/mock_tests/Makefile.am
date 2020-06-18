@@ -23,6 +23,7 @@ LDADD_GTEST = -L/usr/src/gtest
 tests_SOURCES = aclorch_ut.cpp \
                 portsorch_ut.cpp \
                 saispy_ut.cpp \
+                consumer_ut.cpp \
                 ut_saihelper.cpp \
                 mock_orchagent_main.cpp \
                 mock_dbconnector.cpp \
@@ -61,7 +62,7 @@ tests_SOURCES = aclorch_ut.cpp \
                 $(top_srcdir)/orchagent/chassisorch.cpp \
                 $(top_srcdir)/orchagent/sfloworch.cpp \
                 $(top_srcdir)/orchagent/debugcounterorch.cpp \
-                $(top_srcdir)/orchagent/natorch.cpp 
+                $(top_srcdir)/orchagent/natorch.cpp
 
 tests_SOURCES += $(FLEX_CTR_DIR)/flex_counter_manager.cpp $(FLEX_CTR_DIR)/flex_counter_stat_manager.cpp
 tests_SOURCES += $(DEBUG_CTR_DIR)/debug_counter.cpp $(DEBUG_CTR_DIR)/drop_counter.cpp
@@ -69,4 +70,4 @@ tests_SOURCES += $(DEBUG_CTR_DIR)/debug_counter.cpp $(DEBUG_CTR_DIR)/drop_counte
 tests_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_GTEST) $(CFLAGS_SAI)
 tests_CPPFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_GTEST) $(CFLAGS_SAI) -I$(top_srcdir)/orchagent
 tests_LDADD = $(LDADD_GTEST) $(LDADD_SAI) -lnl-genl-3 -lhiredis -lhiredis -lpthread \
-        -lswsscommon -lswsscommon -lgtest -lgtest_main
+        -lswsscommon -lswsscommon -lgtest -lgtest_main -lnl-3 -lnl-route-3

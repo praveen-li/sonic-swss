@@ -9,6 +9,7 @@ extern "C" {
 #include <string>
 #include <vector>
 #include <map>
+#include <bitset>
 
 #define DEFAULT_PORT_VLAN_ID    1
 /*
@@ -75,6 +76,9 @@ public:
     std::string         m_learn_mode = "hardware";
     bool                m_autoneg = false;
     bool                m_admin_state_up = false;
+    bool                m_init = false;
+    bool                m_isPortQueueMapGenerated = false;
+    bool                m_isPortPriorityGroupMapGenerated = false;
     sai_object_id_t     m_port_id = 0;
     sai_port_fec_mode_t m_fec_mode = SAI_PORT_FEC_MODE_NONE;
     VlanInfo            m_vlan_info;
@@ -96,6 +100,9 @@ public:
     std::vector<sai_object_id_t> m_priority_group_ids;
     sai_port_priority_flow_control_mode_t m_pfc_asym = SAI_PORT_PRIORITY_FLOW_CONTROL_MODE_COMBINED;
     uint8_t m_pfc_bitmask = 0;
+    std::unordered_set<sai_object_id_t> m_ingress_acl_tables_uset;
+    std::unordered_set<sai_object_id_t> m_egress_acl_tables_uset;
+
     uint32_t m_nat_zone_id = 0;
 
     /*
@@ -107,7 +114,6 @@ public:
      */
     std::vector<bool> m_queue_lock;
     std::vector<bool> m_priority_group_lock;
-
 };
 
 }

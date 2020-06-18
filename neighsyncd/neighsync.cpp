@@ -4,10 +4,7 @@
 #include <netlink/route/neighbour.h>
 
 #include "logger.h"
-#include "dbconnector.h"
-#include "producerstatetable.h"
 #include "ipaddress.h"
-#include "netmsg.h"
 #include "linkcache.h"
 #include "macaddress.h"
 
