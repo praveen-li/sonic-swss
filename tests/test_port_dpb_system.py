@@ -11,6 +11,7 @@ from port_dpb import DPB
 
 @pytest.mark.usefixtures('dpb_setup_fixture')
 @pytest.mark.usefixtures('dvs_acl_manager')
+@pytest.mark.usefixtures('dvs_vlan_manager')
 class TestPortDPBSystem(object):
 
     def verify_only_ports_exist(self, dvs, port_names):
@@ -166,6 +167,49 @@ class TestPortDPBSystem(object):
         dvs.verify_port_breakout_mode("Ethernet0", "1x100G[40G]")
         self.verify_only_ports_exist(dvs, ["Ethernet0"])
         print "**** 2x25G(2)+1x50G(2) --> 1x100G passed ****"
+
+    def test_port_breakout_with_vlan(self, dvs):
+        dvs.setup_db()
+        portName = "Ethernet0"
+        vlanID = "100"
+        breakoutMode1 = "1x100G[40G]"
+        breakoutMode2 = "4x25G[10G]"
+        breakoutOption = "-f" #Force breakout by deleting dependencies
+
+        # Create VLAN
+        self.dvs_vlan.create_vlan(vlanID)
+
+        # Verify VLAN is created
+        self.dvs_vlan.get_and_verify_vlan_ids(1)
+
+        # Add port to VLAN
+        self.dvs_vlan.create_vlan_member(vlanID, portName)
+
+        # Verify VLAN member is created
+        self.dvs_vlan.get_and_verify_vlan_member_ids(1)
+
+        # Breakout port from 1x100G[40G] --> 4x25G[10G]
+        dvs.verify_port_breakout_mode("Ethernet0", breakoutMode1)
+        dvs.change_port_breakout_mode("Ethernet0", breakoutMode2, breakoutOption)
+
+        # Verify DPB is successful
+        dvs.verify_port_breakout_mode("Ethernet0", breakoutMode2)
+
+        # Verify port is removed from VLAN
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        # Delete VLAN
+        self.dvs_vlan.remove_vlan(vlanID)
+
+        # Verify VLAN is deleted
+        self.dvs_vlan.get_and_verify_vlan_ids(0)
+
+        # Breakout port from 4x25G[10G] --> 1x100G[40G]
+        dvs.change_port_breakout_mode("Ethernet0", breakoutMode1)
+
+        # Verify DPB is successful
+        dvs.verify_port_breakout_mode("Ethernet0", breakoutMode1)
+
 
     @pytest.mark.skip()
     def test_port_breakout_with_acl(self, dvs):

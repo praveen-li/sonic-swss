@@ -3292,6 +3292,9 @@ bool PortsOrch::removeBridgePort(Port &port)
         return false;
     }
 
+    /* Flush FDB entries pointing to this bridge port */
+    flushFDBEntries(port);
+
     /* Remove bridge port */
     status = sai_bridge_api->remove_bridge_port(port.m_bridge_port_id);
     if (status != SAI_STATUS_SUCCESS)
