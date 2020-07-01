@@ -51,10 +51,6 @@ class TestPortDPBSystem(object):
     F     --> Fail
     Empty --> Not Tested
     '''
-
-    '''
-    @pytest.mark.skip()
-    '''
     def test_port_breakout_one(self, dvs):
         dvs.setup_db()
         dvs.verify_port_breakout_mode("Ethernet0", "1x100G[40G]")
@@ -210,8 +206,6 @@ class TestPortDPBSystem(object):
         # Verify DPB is successful
         dvs.verify_port_breakout_mode("Ethernet0", breakoutMode1)
 
-
-    @pytest.mark.skip()
     def test_port_breakout_with_acl(self, dvs):
         dvs.setup_db()
         dpb = DPB()
@@ -248,24 +242,379 @@ class TestPortDPBSystem(object):
 
         # Verify port is removed from ACL table
         self.dvs_acl.verify_acl_table_count(1)
-
-        #TBD: Uncomment this, or explain why Ethernet0 is being added back to ACL table
-        # Also, string "None" is being added as port to ACL port list after the breakout
-        #self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_acl.verify_acl_group_num(0)
 
         # Verify child ports are created.
         self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"])
 
-        # Enable below snippet after fixing the above issues
-        '''
         # Move back to 1x100G[40G] mode and verify current mode
         dvs.change_port_breakout_mode("Ethernet0", "1x100G[40G]", "-f")
         dpb.verify_port_breakout_mode(dvs, "Ethernet0", "1x100G[40G]")
-        '''
 
         # Remove ACL table and verify the same
         self.dvs_acl.remove_acl_table("test")
         self.dvs_acl.verify_acl_table_count(0)
+
+    def test_cli_command_with_force_option(self, dvs):
+
+        dvs.setup_db()
+        dpb = DPB()
+        self.setup_db(dvs);
+
+        portGroup = ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"]
+        rootPortName = portGroup[0]
+        vlanID = "100"
+        aclTableName = "DPB_ACL_TBL_1"
+        breakoutMode1x = "1x100G[40G]"
+        breakoutMode2x = "2x50G"
+        breakoutMode4x = "4x25G[10G]"
+        breakoutOption = "-f" #Force breakout by deleting dependencies
+
+        # Breakout port with no dependency using "-f" option
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode4x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+
+        # Breakout port with VLAN and ACL dependency
+
+        # Create ACL table and bind port
+        self.dvs_acl.verify_acl_group_num(0)
+        bind_ports = []
+        bind_ports.append(rootPortName)
+        self.dvs_acl.create_acl_table(aclTableName, "L3", bind_ports)
+        self.dvs_acl.verify_acl_group_num(1)
+
+        # Create VLAN and add port to VLAN
+        self.dvs_vlan.create_vlan(vlanID)
+        self.dvs_vlan.create_vlan_member(vlanID, rootPortName)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(1)
+
+        # Breakout port and make sure it succeeds and associations are removed
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode4x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        # Add ports to ACL table and VLAN
+        self.dvs_acl.update_acl_table(aclTableName, portGroup)
+        for p in portGroup:
+            self.dvs_vlan.create_vlan_member(vlanID, p)
+        self.dvs_acl.verify_acl_group_num(len(portGroup))
+        self.dvs_vlan.get_and_verify_vlan_member_ids(len(portGroup))
+
+        # Breakout with "-f" option and ensure it succeeds and associations are removed
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        # Cleanup
+
+        # Remove ACL and VLAN tables
+        self.dvs_acl.remove_acl_table(aclTableName)
+        self.dvs_vlan.remove_vlan(vlanID)
+
+        # Verify cleanup
+        self.dvs_acl.verify_acl_table_count(0)
+        self.dvs_vlan.get_and_verify_vlan_ids(0)
+
+        # check ASIC router interface database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTER_INTERFACE")
+        intf_entries = tbl.getKeys()
+        # one loopback router interface
+        assert len(intf_entries) == 1
+
+        # Bring up port
+        self.set_admin_status(dvs, "Ethernet8", "up")
+
+        # Create L3 interface
+        self.create_l3_intf("Ethernet8", "");
+
+        # Configure IPv4 address on Ethernet8
+        self.add_ip_address("Ethernet8", "10.0.0.8/31")
+
+        intf_entries = tbl.getKeys()
+        # one loopback router interface and one port based router interface
+        assert len(intf_entries) == 2
+
+        # check ASIC route database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY")
+        for key in tbl.getKeys():
+            route = json.loads(key)
+            if route["dest"] == "10.0.0.8/31":
+                subnet_found = True
+            if route["dest"] == "10.0.0.8/32":
+                ip2me_found = True
+
+        assert subnet_found and ip2me_found
+
+        # Breakout Ethernet8 WITH "-f" option and ensure cleanup happened
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode1x)
+        dvs.change_port_breakout_mode("Ethernet8", breakoutMode2x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode2x)
+
+        # check ASIC router interface database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTER_INTERFACE")
+        intf_entries = tbl.getKeys()
+        # one loopback router interface
+        assert len(intf_entries) == 1
+
+        # check ASIC database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY")
+        for key in tbl.getKeys():
+            route = json.loads(key)
+            if route["dest"] == "10.0.0.8/31":
+                assert False
+            if route["dest"] == "10.0.0.8/32":
+                assert False
+
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode2x)
+        dvs.change_port_breakout_mode("Ethernet8", breakoutMode1x)
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode1x)
+
+    def test_cli_command_with_load_default_port_config_option(self, dvs):
+        dvs.setup_db()
+        dpb = DPB()
+        self.setup_db(dvs);
+        # Note below definitions are dependent on default_config_db.json
+        # That is vlanIDs, aclTableNames are all should match with
+        # VLANs and ACL tables in default_config_db.json
+        portGroup = ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"]
+        rootPortName = portGroup[0]
+        vlanIDs = ["100", "101"]
+        aclTableNames = ["DPB_ACL_TBL_1", "DPB_ACL_TBL_2"]
+        breakoutMode1x = "1x100G[40G]"
+        breakoutMode2x = "2x50G"
+        breakoutMode4x = "4x25G[10G]"
+        breakoutOption = "-l"
+
+        # Lets create ACL and VLAN tables
+        bind_ports = []
+        for aclTableName in aclTableNames:
+            self.dvs_acl.create_acl_table(aclTableName, "L3", bind_ports)
+        for vlanID in vlanIDs:
+            self.dvs_vlan.create_vlan(vlanID)
+
+        # Breakout port and expect that newly created ports are
+        # automatically added to VLANs and ACL tables as per
+        # default_config_db.json
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode4x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        self.dvs_acl.verify_acl_group_num(len(portGroup))
+        self.dvs_vlan.get_and_verify_vlan_member_ids(len(portGroup))
+
+        # Breakout port and expect that all ports except root port
+        # get removed from ACL and VLAN
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, breakoutOption + " -f")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        self.dvs_acl.verify_acl_group_num(1)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(1)
+
+        # Breakout port with "-f" and WITHOUT "-l" and expect that
+        # breakout succeeds and root port gets removed from
+        # VLAN and ACL table
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode4x, "-f")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        # Exercise port group spanned across different VLAN and ACl table
+        portGroup = ["Ethernet4", "Ethernet5", "Ethernet6", "Ethernet7"]
+        rootPortName = portGroup[0]
+        breakoutMode2x = "2x50G"
+
+        # Breakout port and expect that newly created ports are
+        # automatically added to VLANs and ACL tables as per
+        # default_config_db.json
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode4x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        self.dvs_acl.verify_acl_group_num(len(portGroup))
+        self.dvs_vlan.get_and_verify_vlan_member_ids(len(portGroup))
+
+        # Breakout port and expect that Ethernet4 and Ethernet6 remain in
+        # ACL and VLAN where as Ethernet5 and Ethernet7 get removed from
+        # VLAN and ACL table
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode2x, breakoutOption + " -f")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode2x)
+        self.dvs_acl.verify_acl_group_num(2)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(2)
+
+        # Breakout again and verify that only root port (Ethernet4) remains in
+        # in VLAN and ACL and Ethernet6 gets removed.
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode2x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, breakoutOption + " -f")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        self.dvs_acl.verify_acl_group_num(1)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(1)
+
+        # Breakout port without "-l" option and ensure that root port
+        # gets removed from VLAN and ACL
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode2x, "-f")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode2x)
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        #Cleanup
+
+        # Move both Ethernet0 and Ethernet4 back to default mode
+        dvs.change_port_breakout_mode("Ethernet0", breakoutMode1x)
+        dpb.verify_port_breakout_mode(dvs, "Ethernet0", breakoutMode1x)
+        dvs.change_port_breakout_mode("Ethernet4", breakoutMode1x)
+        dpb.verify_port_breakout_mode(dvs, "Ethernet4", breakoutMode1x)
+
+        # Delete VLANs and ACL tables
+        bind_ports = []
+        for aclTableName in aclTableNames:
+            self.dvs_acl.remove_acl_table(aclTableName)
+        for vlanID in vlanIDs:
+            self.dvs_vlan.remove_vlan(vlanID)
+
+        # Verify cleanup
+        self.dvs_acl.verify_acl_table_count(0)
+        self.dvs_vlan.get_and_verify_vlan_ids(0)
+
+        ##### Interface dependency test ############
+
+        # check ASIC router interface database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTER_INTERFACE")
+        intf_entries = tbl.getKeys()
+        # one loopback router interface
+        assert len(intf_entries) == 1
+
+        # Breakout Ethernet8 WITH "-l" option and ensure
+        # ip address gets configured as per default_config_db.json
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode1x)
+        dvs.change_port_breakout_mode("Ethernet8", breakoutMode2x, breakoutOption)
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode2x)
+
+        intf_entries = tbl.getKeys()
+        # one loopback router interface and one port based router interface
+        assert len(intf_entries) == 2
+
+        # check ASIC route database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY")
+        for key in tbl.getKeys():
+            route = json.loads(key)
+            if route["dest"] == "10.0.0.8/31":
+                subnet_found = True
+            if route["dest"] == "10.0.0.8/32":
+                ip2me_found = True
+
+        assert subnet_found and ip2me_found
+
+        # Breakout Ethernet8 WITH "-f" option and ensure cleanup happened
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode2x)
+        dvs.change_port_breakout_mode("Ethernet8", breakoutMode1x, "-f")
+        dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode1x)
+
+        # check ASIC router interface database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTER_INTERFACE")
+        intf_entries = tbl.getKeys()
+        # one loopback router interface
+        assert len(intf_entries) == 1
+
+        # check ASIC database
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY")
+        for key in tbl.getKeys():
+            route = json.loads(key)
+            if route["dest"] == "10.0.0.8/31":
+                assert False
+            if route["dest"] == "10.0.0.8/32":
+                assert False
+
+    def test_cli_command_negative(self, dvs):
+        dvs.setup_db()
+        dpb = DPB()
+        self.setup_db(dvs);
+
+        portGroup = ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"]
+        rootPortName = portGroup[0]
+        vlanIDs = ["100", "101"]
+        aclTableNames = ["DPB_ACL_TBL_1", "DPB_ACL_TBL_2"]
+        breakoutMode1x = "1x100G[40G]"
+        breakoutMode4x = "4x25G[10G]"
+
+        # Create only one ACL table and one VLAN table
+        bind_ports = []
+        self.dvs_acl.create_acl_table(aclTableNames[0], "L3", bind_ports)
+        self.dvs_vlan.create_vlan(vlanIDs[0])
+
+        # Add root port to ACL and VLAN tables
+        bind_ports = []
+        bind_ports.append(rootPortName)
+        self.dvs_acl.update_acl_table(aclTableNames[0], bind_ports)
+        self.dvs_vlan.create_vlan_member(vlanIDs[0], rootPortName)
+
+        # Breakout port WITHOUT "-f" option when dependencies exist
+        # TBD: Verify the list of dependencies returned by CLI command
+        self.dvs_acl.verify_acl_group_num(1)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(1)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode4x)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        self.dvs_acl.verify_acl_group_num(1)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(1)
+
+        # Breakout port WITH "-f" option, and WITHOUT "-l" option
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode4x, "-f")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        # Delete VLAN table, ensure breakout WITH "-l" fails
+        self.dvs_vlan.remove_vlan(vlanIDs[0])
+        self.dvs_vlan.get_and_verify_vlan_ids(0)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, "-l")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        # Enable below comment test scenario after fixing yang bug
+        """
+        # Delete ACL table, Add back VLAN table and
+        # ensure breakout WITH "-l" fails
+        self.dvs_acl.remove_acl_table(aclTableNames[0])
+        self.dvs_acl.verify_acl_table_count(0)
+        self.dvs_vlan.create_vlan(vlanIDs[0])
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, "-l")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        self.dvs_acl.verify_acl_group_num(0)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(0)
+
+        # Add back ACL table and ensure, breakout succeeds
+        bind_ports = []
+        self.dvs_acl.create_acl_table(aclTableNames[0], "L3", bind_ports)
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
+        dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, "-l")
+        dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
+        self.dvs_acl.verify_acl_group_num(1)
+        self.dvs_vlan.get_and_verify_vlan_member_ids(1)
+
+        # Delete ACL and VLAN tables
+        self.dvs_vlan.remove_vlan(vlanIDs[0])
+        """
+        self.dvs_acl.remove_acl_table(aclTableNames[0])
+
+        # TBD: Provide "-l" option without default_config_db.json file
+
+        # Verify cleanup
+        self.dvs_acl.verify_acl_table_count(0)
+        self.dvs_vlan.get_and_verify_vlan_ids(0)
 
     def test_dpb_arp_flush(self, dvs):
         dvs.setup_db()
