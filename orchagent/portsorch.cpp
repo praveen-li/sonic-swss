@@ -1541,7 +1541,7 @@ void PortsOrch::updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples) co
     new_tuples.push_back(tuple);
 }
 
-void PortsOrch::updateDbPortOperStatus(const Port& port, sai_port_oper_status_t status) const
+void PortsOrch::updateDbPortStatus(const Port& port, sai_port_oper_status_t status) const
 {
     SWSS_LOG_ENTER();
 
@@ -4022,7 +4022,7 @@ void PortsOrch::updatePortOperStatus(Port &port, sai_port_oper_status_t status)
         return ;
     }
 
-    updateDbPortOperStatus(port, status);
+    updateDbPortStatus(port, status);
     port.m_oper_status = status;
 
     bool isUp = status == SAI_PORT_OPER_STATUS_UP;

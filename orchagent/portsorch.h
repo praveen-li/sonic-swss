@@ -75,7 +75,7 @@ public:
     bool getAclBindPortId(string alias, sai_object_id_t &port_id);
 
     bool setHostIntfsOperStatus(const Port& port, bool up) const;
-    void updateDbPortOperStatus(const Port& port, sai_port_oper_status_t status) const;
+    void updateDbPortStatus(const Port& port, sai_port_oper_status_t status) const;
     bool createBindAclTableGroup(sai_object_id_t  port_oid,
 		                 sai_object_id_t  acl_table_oid,
 		                 sai_object_id_t  &group_oid,
