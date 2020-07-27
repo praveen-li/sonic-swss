@@ -172,7 +172,10 @@ class DockerVirtualSwitch(object):
         self.natd = ['natsyncd', 'natmgrd']
         self.alld  = self.basicd + self.swssd + self.syncd + self.rtd + self.teamd + self.natd
         # Dynamic port breakout command may wait for 60 second incase of breakout failure.
-        # So, to avoid socker red timeout, setting timeout to 120 seconds
+        # So, to avoid socket read timeout, setting timeout to 300 seconds
+        # Tries with 120 seconds, but still saw the failure, but 300 seconds consistently
+        # succeeded. Hence keeping it to 300 seconds while we dig deeper on why it
+        # take more than 60 seconds.
         self.client = docker.from_env(timeout=300)
         self.appldb = None
 
