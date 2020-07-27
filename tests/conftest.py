@@ -171,7 +171,9 @@ class DockerVirtualSwitch(object):
         self.teamd = ['teamsyncd', 'teammgrd']
         self.natd = ['natsyncd', 'natmgrd']
         self.alld  = self.basicd + self.swssd + self.syncd + self.rtd + self.teamd + self.natd
-        self.client = docker.from_env()
+        # Dynamic port breakout command may wait for 60 second incase of breakout failure.
+        # So, to avoid socker red timeout, setting timeout to 120 seconds
+        self.client = docker.from_env(timeout=300)
         self.appldb = None
 
         if subprocess.check_call(["/sbin/modprobe", "team"]) != 0:

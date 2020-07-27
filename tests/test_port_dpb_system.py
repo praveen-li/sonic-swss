@@ -374,13 +374,13 @@ class TestPortDPBSystem(object):
         dvs.change_port_breakout_mode("Ethernet8", breakoutMode1x)
         dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode1x)
 
-    def test_cli_command_with_load_default_port_config_option(self, dvs):
+    def test_cli_command_with_load_port_breakout_config_option(self, dvs):
         dvs.setup_db()
         dpb = DPB()
         self.setup_db(dvs);
-        # Note below definitions are dependent on default_config_db.json
+        # Note below definitions are dependent on port_breakout_config_db.json
         # That is vlanIDs, aclTableNames are all should match with
-        # VLANs and ACL tables in default_config_db.json
+        # VLANs and ACL tables in port_breakout_config_db.json
         portGroup = ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"]
         rootPortName = portGroup[0]
         vlanIDs = ["100", "101"]
@@ -399,7 +399,7 @@ class TestPortDPBSystem(object):
 
         # Breakout port and expect that newly created ports are
         # automatically added to VLANs and ACL tables as per
-        # default_config_db.json
+        # port_breakout_config_db.json
         self.dvs_acl.verify_acl_group_num(0)
         self.dvs_vlan.get_and_verify_vlan_member_ids(0)
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
@@ -432,7 +432,7 @@ class TestPortDPBSystem(object):
 
         # Breakout port and expect that newly created ports are
         # automatically added to VLANs and ACL tables as per
-        # default_config_db.json
+        # port_breakout_config_db.json
         self.dvs_acl.verify_acl_group_num(0)
         self.dvs_vlan.get_and_verify_vlan_member_ids(0)
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
@@ -494,7 +494,7 @@ class TestPortDPBSystem(object):
         assert len(intf_entries) == 1
 
         # Breakout Ethernet8 WITH "-l" option and ensure
-        # ip address gets configured as per default_config_db.json
+        # ip address gets configured as per port_breakout_config_db.json
         dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode1x)
         dvs.change_port_breakout_mode("Ethernet8", breakoutMode2x, breakoutOption)
         dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode2x)
@@ -583,8 +583,6 @@ class TestPortDPBSystem(object):
         self.dvs_acl.verify_acl_group_num(0)
         self.dvs_vlan.get_and_verify_vlan_member_ids(0)
 
-        # Enable below comment test scenario after fixing yang bug
-        """
         # Delete ACL table, Add back VLAN table and
         # ensure breakout WITH "-l" fails
         self.dvs_acl.remove_acl_table(aclTableNames[0])
@@ -607,10 +605,9 @@ class TestPortDPBSystem(object):
 
         # Delete ACL and VLAN tables
         self.dvs_vlan.remove_vlan(vlanIDs[0])
-        """
         self.dvs_acl.remove_acl_table(aclTableNames[0])
 
-        # TBD: Provide "-l" option without default_config_db.json file
+        # TBD: Provide "-l" option without port_breakout_config_db.json file
 
         # Verify cleanup
         self.dvs_acl.verify_acl_table_count(0)
