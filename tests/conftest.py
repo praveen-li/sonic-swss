@@ -403,6 +403,19 @@ class DockerVirtualSwitch(object):
 
         return (exitcode, out)
 
+    def runcmd_interactive(self, cmd):
+        res = self.ctn.exec_run(cmd, socket=True, stdout=True, stdin=True, tty=True)
+        try:
+            exitcode = res.exit_code
+            out = res.output
+        except AttributeError:
+            exitcode = None
+            out = res
+        if exitcode is not None:
+            print "-----rc={} for cmd {}-----".format(exitcode, cmd)
+
+        return (exitcode, out)
+
     def copy_file(self, path, filename):
         tarstr = StringIO.StringIO()
         tar = tarfile.open(fileobj=tarstr, mode="w")
