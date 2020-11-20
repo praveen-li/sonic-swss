@@ -51,118 +51,36 @@ class TestPortDPBSystem(object):
     F     --> Fail
     Empty --> Not Tested
     '''
-    def test_port_breakout_one(self, dvs):
+    @pytest.mark.parametrize('root_port, breakout_mode',  [
+        ('Ethernet0', '2x50G'),
+        ('Ethernet0', '4x25G[10G]'),
+        ('Ethernet0', '2x50G'),
+        ('Ethernet0', '2x25G(2)+1x50G(2)'),
+        ('Ethernet0', '2x50G'),
+        ('Ethernet0', '1x50G(2)+2x25G(2)'),
+        ('Ethernet0', '2x50G'),
+        ('Ethernet0', '1x100G[40G]'),
+        ('Ethernet0', '4x25G[10G]'),
+        ('Ethernet0', '2x25G(2)+1x50G(2)'),
+        ('Ethernet0', '4x25G[10G]'),
+        ('Ethernet0', '1x50G(2)+2x25G(2)'),
+        ('Ethernet0', '4x25G[10G]'),
+        ('Ethernet0', '1x100G[40G]'),
+        ('Ethernet0', '2x25G(2)+1x50G(2)'),
+        ('Ethernet0', '1x50G(2)+2x25G(2)'),
+        ('Ethernet0', '2x25G(2)+1x50G(2)'),
+        ('Ethernet0', '1x100G[40G]'),
+        ('Ethernet0', '1x50G(2)+2x25G(2)'),
+        ('Ethernet0', '1x100G[40G]')
+    ], scope="function")
+    def test_port_breakout_simple(self, dvs, root_port, breakout_mode):
         dvs.setup_db()
-        dvs.verify_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0"])
+        dpb = DPB()
 
-        ########## 2X50G to all other modes and vice-versa ##########
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x50G")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x50G")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2"])
-        print "**** 1X100G --> 2x50G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"])
-        print "**** 2x50G --> 4X25G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x50G")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x50G")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2"])
-        print "**** 4X25G --> 2x50G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2"])
-        print "**** 2X50G --> 2x25G(2)+1x50G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x50G")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x50G")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2"])
-        print "**** 2x25G(2)+1x50G(2) --> 2x50G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2", "Ethernet3"])
-        print "**** 2X50G --> 1x50G(2)+2x25G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x50G")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x50G")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2"])
-        print "**** 1x50G(2)+2x25G(2) --> 2x50G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0"])
-        print "**** 2x50G --> 1x100G passed ****"
-
-        ########## 4X25G to all other modes and vice-versa ##########
-
-        dvs.change_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"])
-        print "**** 1x100G --> 4X25G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2", "Ethernet3"])
-        print "**** 4X25G --> 1x50G(2)+2x25G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"])
-        print "**** 1x50G(2)+2x25G(2) --> 4X25G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2"])
-        print "**** 4X25G --> 2x25G(2)+1x50G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "4x25G[10G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2", "Ethernet3"])
-        print "**** 2x25G(2)+1x50G(2) --> 4X25G passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0"])
-        print "**** 4x25G --> 1x100G passed ****"
-
-        ########## 1x50G(2)+2x25G(2) to all other modes and vice-versa ##########
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2", "Ethernet3"])
-        print "**** 1X100G --> 1x50G(2)+2x25G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2"])
-        print "**** 1x50G(2)+2x25G(2) --> 2x25G(2)+1x50G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x50G(2)+2x25G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet2", "Ethernet3"])
-        print "**** 2x25G(2)+1x50G(2) --> 1x50G(2)+2x25G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0"])
-        print "**** 1x50G(2)+2x25G(2) --> 1x100G passed ****"
-
-        ########## 2x25G(2)+1x50G(2) to all other modes and vice-versa ##########
-
-        dvs.change_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        dvs.verify_port_breakout_mode("Ethernet0", "2x25G(2)+1x50G(2)")
-        self.verify_only_ports_exist(dvs, ["Ethernet0", "Ethernet1", "Ethernet2"])
-        print "**** 1x100G --> 2x25G(2)+1x50G(2) passed ****"
-
-        dvs.change_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        dvs.verify_port_breakout_mode("Ethernet0", "1x100G[40G]")
-        self.verify_only_ports_exist(dvs, ["Ethernet0"])
-        print "**** 2x25G(2)+1x50G(2) --> 1x100G passed ****"
+        dvs.change_port_breakout_mode(root_port, breakout_mode)
+        dvs.verify_port_breakout_mode(root_port, breakout_mode)
+        expected_ports = dpb.get_child_ports(root_port, breakout_mode)
+        self.verify_only_ports_exist(dvs, expected_ports)
 
     def test_port_breakout_with_vlan(self, dvs):
         dvs.setup_db()
@@ -255,8 +173,8 @@ class TestPortDPBSystem(object):
         self.dvs_acl.remove_acl_table("test")
         self.dvs_acl.verify_acl_table_count(0)
 
+    @pytest.mark.skip("FALCO-2746")
     def test_cli_command_with_force_option(self, dvs):
-
         dvs.setup_db()
         dpb = DPB()
         self.setup_db(dvs);
@@ -268,7 +186,7 @@ class TestPortDPBSystem(object):
         breakoutMode1x = "1x100G[40G]"
         breakoutMode2x = "2x50G"
         breakoutMode4x = "4x25G[10G]"
-        breakoutOption = "-f" #Force breakout by deleting dependencies
+        breakoutOption = "-f -v" #Force breakout by deleting dependencies
 
         # Breakout port with no dependency using "-f" option
         dvs.change_port_breakout_mode(rootPortName, breakoutMode4x, breakoutOption)
@@ -297,7 +215,7 @@ class TestPortDPBSystem(object):
         self.dvs_acl.verify_acl_group_num(0)
         self.dvs_vlan.get_and_verify_vlan_member_ids(0)
 
-        # Add ports to ACL table and VLAN
+        # Add ports to ACL and VLAN tables
         self.dvs_acl.update_acl_table(aclTableName, portGroup)
         for p in portGroup:
             self.dvs_vlan.create_vlan_member(vlanID, p)
@@ -374,6 +292,7 @@ class TestPortDPBSystem(object):
         dvs.change_port_breakout_mode("Ethernet8", breakoutMode1x)
         dpb.verify_port_breakout_mode(dvs, "Ethernet8", breakoutMode1x)
 
+    @pytest.mark.skip("FALCO-2746")
     def test_cli_command_with_load_port_breakout_config_option(self, dvs):
         dvs.setup_db()
         dpb = DPB()
@@ -409,7 +328,7 @@ class TestPortDPBSystem(object):
         self.dvs_vlan.get_and_verify_vlan_member_ids(len(portGroup))
 
         # Breakout port and expect that all ports except root port
-        # get removed from ACL and VLAN
+        # get removed from ACL and VLAN tables
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
         dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, breakoutOption + " -f")
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
@@ -443,7 +362,7 @@ class TestPortDPBSystem(object):
 
         # Breakout port and expect that Ethernet4 and Ethernet6 remain in
         # ACL and VLAN where as Ethernet5 and Ethernet7 get removed from
-        # VLAN and ACL table
+        # VLAN and ACL tables
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
         dvs.change_port_breakout_mode(rootPortName, breakoutMode2x, breakoutOption + " -f")
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode2x)
@@ -594,9 +513,12 @@ class TestPortDPBSystem(object):
         self.dvs_acl.verify_acl_group_num(0)
         self.dvs_vlan.get_and_verify_vlan_member_ids(0)
 
-        # Add back ACL table and ensure, breakout succeeds
+        # Create both ACL tables (as per port_breakout_config_db.json,
+        # Ethernet0 is in both ACL tables and one VLAN table)
+        # and ensure, breakout succeeds
         bind_ports = []
         self.dvs_acl.create_acl_table(aclTableNames[0], "L3", bind_ports)
+        self.dvs_acl.create_acl_table(aclTableNames[1], "L3", bind_ports)
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode4x)
         dvs.change_port_breakout_mode(rootPortName, breakoutMode1x, "-l")
         dpb.verify_port_breakout_mode(dvs, rootPortName, breakoutMode1x)
@@ -604,8 +526,10 @@ class TestPortDPBSystem(object):
         self.dvs_vlan.get_and_verify_vlan_member_ids(1)
 
         # Delete ACL and VLAN tables
+        self.dvs_vlan.remove_vlan_member(vlanIDs[0], rootPortName)
         self.dvs_vlan.remove_vlan(vlanIDs[0])
         self.dvs_acl.remove_acl_table(aclTableNames[0])
+        self.dvs_acl.remove_acl_table(aclTableNames[1])
 
         # TBD: Provide "-l" option without port_breakout_config_db.json file
 
@@ -763,6 +687,7 @@ class TestPortDPBSystem(object):
         dvs.servers[0].runcmd(cmd)
         dvs.servers[0].runcmd("ip address add 10.0.0.1/31 dev eth0")
         dvs.servers[0].runcmd("ip route add default via 10.0.0.0")
+        time.sleep(2)
 
         # Get neighbor and ARP entry
         dvs.servers[0].runcmd("ping -c 1 10.0.0.0")
@@ -778,9 +703,11 @@ class TestPortDPBSystem(object):
 
         fvs_dict = dict(fvs)
         assert fvs_dict["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS"] == srv0MAC
+
         # Bring link operation state down
         self.set_admin_status(dvs, portName, "down")
         dvs.servers[0].runcmd("ip link set dev eth0 down")
+        time.sleep(2)
 
         #Verify ARP/Neighbor entry is removed
         intf_entries = tbl.getKeys()
@@ -947,6 +874,7 @@ class TestPortDPBSystem(object):
         dvs.servers[1].runcmd("ip address flush dev eth0")
         dvs.servers[2].runcmd("ip address flush dev eth0")
         dvs.servers[3].runcmd("ip address flush dev eth0")
+        time.sleep(1)
 
     def create_vlan(self, vlan_id):
         tbl = swsscommon.Table(self.cdb, "VLAN")

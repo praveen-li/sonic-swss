@@ -226,6 +226,7 @@ class Port():
         assert(fvs_dict['SAI_PORT_ATTR_SPEED'] == str(self.get_speed()))
 
 class DPB():
+    MAX_LANES = 4
     def breakin(self, dvs, port_names):
         child_ports = []
         for pname in port_names:
@@ -313,3 +314,34 @@ class DPB():
             p.verify_app_db()
             time.sleep(1)
             p.verify_asic_db()
+
+    def verify_port_breakout_mode(self, dvs, port_name, breakout_mode):
+        p = Port(dvs, port_name)
+        p.verify_breakout_mode(breakout_mode);
+
+    def get_child_ports(self, root_port, breakout_mode):
+
+        if '+' not in breakout_mode:
+            return self._get_child_ports(root_port, breakout_mode, self.MAX_LANES)
+
+        modes = breakout_mode.split('+')
+        child_ports = []
+        root_port_num = int(root_port.split('Ethernet')[1])
+        for mode in modes:
+            lanes = int(mode.split('(')[1].split(')')[0])
+            mode = mode.split('(')[0]
+            child_ports = child_ports + self._get_child_ports(root_port, mode, lanes)
+            root_port_num = root_port_num + lanes
+            root_port = 'Ethernet' + str(root_port_num)
+
+        return child_ports
+
+    def _get_child_ports(self, root_port, breakout_mode, lanes):
+        count = int(breakout_mode.split('x')[0])
+        port = int(root_port.split('Ethernet')[1])
+
+        child_ports = []
+        jump = lanes/count
+        for i in range(0, lanes, jump):
+            child_ports.append('Ethernet{}'.format(port+i))
+        return child_ports
