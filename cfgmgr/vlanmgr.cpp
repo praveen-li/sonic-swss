@@ -17,6 +17,7 @@ using namespace swss;
 #define DEFAULT_VLAN_ID     "1"
 #define DEFAULT_MTU_STR     "9100"
 #define VLAN_HLEN            4
+#define DUMMY_INTF_NAME     "dummy"
 
 extern MacAddress gMacAddress;
 
@@ -87,9 +88,9 @@ VlanMgr::VlanMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, c
       + IP_CMD + " link set " + DOT1Q_BRIDGE_NAME + " mtu " + DEFAULT_MTU_STR + " && "
       + IP_CMD + " link set " + DOT1Q_BRIDGE_NAME + " address " + gMacAddress.to_string() + " && "
       + BRIDGE_CMD + " vlan del vid " + DEFAULT_VLAN_ID + " dev " + DOT1Q_BRIDGE_NAME + " self; "
-      + IP_CMD + " link del dev dummy 2>/dev/null; "
-      + IP_CMD + " link add dummy type dummy && "
-      + IP_CMD + " link set dummy master " + DOT1Q_BRIDGE_NAME + "\"";
+      + IP_CMD + " link del " + DUMMY_INTF_NAME + " 2>/dev/null; "
+      + IP_CMD + " link add " + DUMMY_INTF_NAME + " type dummy && "
+      + IP_CMD + " link set " + DUMMY_INTF_NAME + " up master " + DOT1Q_BRIDGE_NAME + "\"";
 
     std::string res;
     EXEC_WITH_ERROR_THROW(cmds, res);

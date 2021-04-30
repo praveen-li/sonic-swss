@@ -650,6 +650,7 @@ void IntfsOrch::doTask(Consumer &consumer)
         }
 
         string op = kfvOp(t);
+
         if (op == SET_COMMAND)
         {
             if (is_lo)
@@ -696,6 +697,10 @@ void IntfsOrch::doTask(Consumer &consumer)
                 }
                 else
                 {
+                    /*
+                     * TBD -- link local on bridge port need to be handled here
+                     * Otherwise, the request will be hit here endlessly
+                     */
                     /* TODO: Resolve the dependency relationship and add ref_count to port */
                     it++;
                     continue;

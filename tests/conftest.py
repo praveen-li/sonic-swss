@@ -269,7 +269,13 @@ class DockerVirtualSwitch:
 
         self.persistent = False
 
-        self.client = docker.from_env()
+        # Dynamic port breakout command may wait for 60 second incase of breakout failure.
+        # So, to avoid socket read timeout, setting timeout to 300 seconds
+        # Tries with 120 seconds, but still saw the failure, but 300 seconds consistently
+        # succeeded. Hence keeping it to 300 seconds while we dig deeper on why it
+        # take more than 60 seconds.
+        self.client = docker.from_env(timeout=300)
+        self.appldb = None
 
         # Use the provided persistent DVS testbed
         if name:
@@ -553,6 +559,20 @@ class DockerVirtualSwitch:
             print("-----")
 
         return (exitcode, out)
+
+    def runcmd_interactive(self, cmd):
+        res = self.ctn.exec_run(cmd, socket=True, stdout=True, stdin=True, tty=True)
+        try:
+            exitcode = res.exit_code
+            out = res.output
+        except AttributeError:
+            exitcode = None
+            out = res
+        if exitcode is not None:
+            print "-----rc={} for cmd {}-----".format(exitcode, cmd)
+
+        return (exitcode, out)
+
 
     # used in buildimage tests, do not delete
     def copy_file(self, path: str, filename: str) -> None:
@@ -1130,6 +1150,114 @@ class DockerVirtualSwitch:
         # explicit convert unicode string to str for python2
         ntf.send("set_ro", str(key), fvp)
 
+    def create_acl_table(self, table, type, ports):
+        tbl = swsscommon.Table(self.cdb, "ACL_TABLE")
+        fvs = swsscommon.FieldValuePairs([("policy_desc", table),
+                                          ("type", type),
+                                          ("ports", ",".join(ports))])
+        tbl.set(table, fvs)
+        time.sleep(1)
+
+    def remove_acl_table(self, table):
+        tbl = swsscommon.Table(self.cdb, "ACL_TABLE")
+        tbl._del(table)
+        time.sleep(1)
+
+    def update_acl_table(self, table, fvs):
+        tbl = swsscommon.Table(self.cdb, "ACL_TABLE")
+        tbl.set(table, fvs)
+        time.sleep(1)
+
+    def get_acl_table_ids(self):
+        tbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE")
+        keys = tbl.getKeys()
+
+        for k in self.asicdb.default_acl_tables:
+            assert k in keys
+
+        acl_tables = [k for k in keys if k not in self.asicdb.default_acl_tables]
+
+        return acl_tables
+
+    def verify_if_any_acl_table_created(self):
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE")
+        keys = atbl.getKeys()
+        for k in  dvs.asicdb.default_acl_tables:
+            assert k in keys
+        acl_tables = [k for k in keys if k not in dvs.asicdb.default_acl_tables]
+
+        if len(acl_tables) != 0:
+            return True
+
+        return False
+
+    def clean_up_left_over(self):
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP")
+        keys = atbl.getKeys()
+        for key in keys:
+            atbl._del(key)
+
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP")
+        keys = atbl.getKeys()
+        assert len(keys) == 0
+
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP_MEMBER")
+        keys = atbl.getKeys()
+        for key in keys:
+            atbl._del(key)
+
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP_MEMBER")
+        keys = atbl.getKeys()
+        assert len(keys) == 0
+
+    def verify_acl_group_num(self, expt):
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP")
+        acl_table_groups = atbl.getKeys()
+        assert len(acl_table_groups) == expt
+
+        for k in acl_table_groups:
+            (status, fvs) = atbl.get(k)
+            assert status == True
+            for fv in fvs:
+                if fv[0] == "SAI_ACL_TABLE_GROUP_ATTR_ACL_STAGE":
+                    assert fv[1] == "SAI_ACL_STAGE_INGRESS"
+                elif fv[0] == "SAI_ACL_TABLE_GROUP_ATTR_ACL_BIND_POINT_TYPE_LIST":
+                    assert fv[1] == "1:SAI_ACL_BIND_POINT_TYPE_PORT"
+                elif fv[0] == "SAI_ACL_TABLE_GROUP_ATTR_TYPE":
+                    assert fv[1] == "SAI_ACL_TABLE_GROUP_TYPE_PARALLEL"
+                else:
+                    assert False
+
+    def get_acl_group_ids(self):
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP")
+        acl_table_groups = atbl.getKeys()
+        return acl_table_groups
+
+    def get_fvs_dict(self, fvs):
+        fvs_dict = {}
+        for fv in fvs:
+            fvs_dict.update({fv[0]:fv[1]})
+        return fvs_dict
+
+    def verify_acl_group_member(self, acl_group_id, acl_table_id):
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP_MEMBER")
+        keys = atbl.getKeys()
+
+        for k in keys:
+            (status, fvs) = atbl.get(k)
+            assert status == True
+            assert len(fvs) == 3
+            fvs_dict = self.get_fvs_dict(fvs)
+            if (fvs_dict["SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_GROUP_ID"] == acl_group_id and
+                    fvs_dict["SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_ID"] == acl_table_id) :
+                return True
+        assert False
+
+    def verify_acl_port_binding(self, bind_ports):
+        atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE_GROUP")
+        acl_table_groups = atbl.getKeys()
+        assert len(acl_table_groups) == len(bind_ports)
+
     # FIXME: Now that ApplDbValidator is using DVSDatabase we should converge this with
     # that implementation. Save it for a follow-up PR.
     def get_app_db(self) -> ApplDbValidator:
@@ -1177,6 +1305,60 @@ class DockerVirtualSwitch:
             self.state_db = DVSDatabase(self.STATE_DB_ID, self.redis_sock)
 
         return self.state_db
+
+    def change_port_breakout_mode(self, intf_name, target_mode, options=""):
+        cmd = "config interface breakout %s %s -y %s"%(intf_name, target_mode, options)
+        self.runcmd(cmd)
+        time.sleep(2)
+
+    def verify_port_breakout_mode(self, intf_name, current_mode):
+        brkout_cfg_tbl = swsscommon.Table(self.cdb, "BREAKOUT_CFG")
+        (status, fvs) = brkout_cfg_tbl.get(intf_name)
+        assert(status == True)
+        fvs_dict = self.get_fvs_dict(fvs)
+        assert(fvs_dict["brkout_mode"] == current_mode)
+
+################# DVSLIB module manager fixtures #############################
+@pytest.yield_fixture(scope="class")
+def dvs_acl_manager(request, dvs):
+    request.cls.dvs_acl = dvs_acl.DVSAcl(dvs.get_asic_db(),
+                                         dvs.get_config_db(),
+                                         dvs.get_state_db(),
+                                         dvs.get_counters_db())
+
+@pytest.yield_fixture(scope="class")
+def dvs_lag_manager(request, dvs):
+    request.cls.dvs_lag = dvs_lag.DVSLag(dvs.get_config_db())
+
+@pytest.yield_fixture(scope="class")
+def dvs_vlan_manager(request, dvs):
+    request.cls.dvs_vlan = dvs_vlan.DVSVlan(dvs.get_asic_db(),
+                                            dvs.get_config_db(),
+                                            dvs.get_state_db(),
+                                            dvs.get_counters_db(),
+                                            dvs.get_app_db())
+
+##################### DPB fixtures ###########################################
+@pytest.yield_fixture(scope="module")
+def create_dpb_config_file(dvs):
+    cmd = "sonic-cfggen -j /etc/sonic/init_cfg.json -j /tmp/ports.json --print-data > /tmp/dpb_config_db.json"
+    dvs.runcmd(['sh', '-c', cmd])
+    cmd = "mv /etc/sonic/config_db.json /etc/sonic/config_db.json.bak"
+    dvs.runcmd(cmd)
+    cmd = "cp /tmp/dpb_config_db.json /etc/sonic/config_db.json"
+    dvs.runcmd(cmd)
+
+@pytest.yield_fixture(scope="module")
+def remove_dpb_config_file(dvs):
+    cmd = "mv /etc/sonic/config_db.json.bak /etc/sonic/config_db.json"
+    dvs.runcmd(cmd)
+
+@pytest.yield_fixture(scope="module")
+def dpb_setup_fixture(dvs):
+    create_dpb_config_file(dvs)
+    dvs.restart()
+    yield
+    remove_dpb_config_file(dvs)
 
 
 class DockerVirtualChassisTopology:

@@ -1673,7 +1673,7 @@ bool AclTable::bind(sai_object_id_t portOid)
     sai_object_id_t group_member_oid;
     if (!gPortsOrch->bindAclTable(portOid, m_oid, group_member_oid, stage))
     {
-        SWSS_LOG_ERROR("Failed to bind port oid: %" PRIx64 "", portOid);
+        SWSS_LOG_NOTICE("Failed to bind port oid: %" PRIx64 "", portOid);
         return false;
     }
     SWSS_LOG_NOTICE("Successfully bound port oid: %" PRIx64", group member oid:%" PRIx64 "",

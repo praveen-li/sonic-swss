@@ -123,6 +123,8 @@ class TestRoute(TestRouteBase):
         # bring up interface
         self.set_admin_status("Ethernet0", "up")
         self.set_admin_status("Ethernet4", "up")
+        dvs.servers[0].runcmd("ip link set dev eth0 up")
+        dvs.servers[1].runcmd("ip link set dev eth0 up")
 
         # set ip address and default route
         dvs.servers[0].runcmd("ip address add 10.0.0.1/31 dev eth0")

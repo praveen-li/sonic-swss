@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <inttypes.h>
+
 #include "neighorch.h"
 #include "logger.h"
 #include "swssnet.h"
@@ -477,7 +479,8 @@ void NeighOrch::doTask(Consumer &consumer)
 
         string alias = key.substr(0, found);
 
-        if (alias == "eth0" || alias == "lo" || alias == "docker0")
+        // skip the neighbors from special interfaces, ie, not writing to HW
+        if (alias == "eth0" || alias == "lo" || alias == "docker0" || alias == "usb0")
         {
             it = consumer.m_toSync.erase(it);
             continue;

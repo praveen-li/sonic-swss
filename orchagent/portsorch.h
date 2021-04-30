@@ -245,7 +245,8 @@ private:
     bool addPort(const set<int> &lane_set, uint32_t speed, int an=0, string fec="");
     sai_status_t removePort(sai_object_id_t port_id);
     bool initPort(const string &alias, const int index, const set<int> &lane_set);
-    void deInitPort(string alias, sai_object_id_t port_id);
+    void deInitPort(Port&);
+    void flush();
 
     bool setPortAdminStatus(Port &port, bool up);
     bool getPortAdminStatus(sai_object_id_t id, bool& up);
@@ -269,16 +270,20 @@ private:
     bool getQueueTypeAndIndex(sai_object_id_t queue_id, string &type, uint8_t &index);
 
     bool m_isQueueMapGenerated = false;
-    void generateQueueMapPerPort(const Port& port);
+    void generateQueueMapPerPort(Port& port);
+    void destroyQueueMapPerPort(Port& port);
 
     bool m_isPriorityGroupMapGenerated = false;
-    void generatePriorityGroupMapPerPort(const Port& port);
+    void generatePriorityGroupMapPerPort(Port& port);
+    void destroyPriorityGroupMapPerPort(Port& port);
 
     bool setPortAutoNeg(sai_object_id_t id, int an);
     bool setPortFecMode(sai_object_id_t id, int fec);
 
     bool getPortOperStatus(const Port& port, sai_port_oper_status_t& status) const;
     void updatePortOperStatus(Port &port, sai_port_oper_status_t status);
+    void updateDbPortFlapCounter(const string &alias, vector<FieldValueTuple>& old_tuples, vector<FieldValueTuple>& new_tuples) const;
+    void updateDbPortLastFlapTime(vector<FieldValueTuple>& new_tuples) const;
 
     void getPortSerdesVal(const std::string& s, std::vector<uint32_t> &lane_values);
 
@@ -290,6 +295,8 @@ private:
 
     bool getSaiAclBindPointType(Port::Type                type,
                                 sai_acl_bind_point_type_t &sai_acl_bind_type);
+
+    void flushFDBEntries(Port& port);
     void initGearbox();
     bool initGearboxPort(Port &port);
     

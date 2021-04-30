@@ -219,6 +219,12 @@ void LinkSync::onMsg(int nlmsg_type, struct nl_object *obj)
         return;
     }
 
+    /* If this is a bridge port, return */
+    if (master)
+    {
+        return;
+    }
+
     /* In the event of swss restart, it is possible to get netlink messages during bridge
      * delete, interface delete etc which are part of cleanup. These netlink messages for
      * the front-panel interface must not be published or it will update the statedb with
