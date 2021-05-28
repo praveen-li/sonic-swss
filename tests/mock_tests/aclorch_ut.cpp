@@ -312,14 +312,8 @@ namespace aclorch_test
                 { APP_LAG_MEMBER_TABLE_NAME, portsorch_base_pri }
             };
 
-            TableConnector applDbFdb(m_app_db.get(), APP_FDB_TABLE_NAME);
-            TableConnector stateDbFdb(m_state_db.get(), STATE_FDB_TABLE_NAME);
-
             ASSERT_EQ(gPortsOrch, nullptr);
             gPortsOrch = new PortsOrch(m_app_db.get(), ports_tables);
-
-            ASSERT_EQ(gFdbOrch, nullptr);
-            gFdbOrch = new FdbOrch(applDbFdb, stateDbFdb, gPortsOrch);
 
             ASSERT_EQ(gCrmOrch, nullptr);
             gCrmOrch = new CrmOrch(m_config_db.get(), CFG_CRM_TABLE_NAME);

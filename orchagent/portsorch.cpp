@@ -1934,7 +1934,7 @@ sai_status_t PortsOrch::removePort(sai_object_id_t port_id)
 
     flush();
     m_portCount--;
-    SWSS_LOG_NOTICE("Remove port %" PRIx64, port_id
+    SWSS_LOG_NOTICE("Remove port %" PRIx64, port_id);
     return status;
 }
 
@@ -2046,12 +2046,8 @@ void PortsOrch::deInitPort(Port& p)
 {
     SWSS_LOG_ENTER();
 
-    string pAlias = p.m_alias;
-    sai_object_id_t pOID = p.m_port_id;
-
-    /* remove port name map from counter table */
-    RedisClient redisClient(m_counter_db.get());
-    redisClient.hdel(COUNTERS_PORT_NAME_MAP, pAlias);
+    string alias = p.m_alias;
+    sai_object_id_t port_id = p.m_port_id;
 
     // Destroy port's queue and PG flex stat counters
     if (p.m_isPortQueueMapGenerated)
@@ -2064,24 +2060,6 @@ void PortsOrch::deInitPort(Port& p)
         destroyPriorityGroupMapPerPort(p);
     }
 
-    /* remove port from flex_counter for updating stat counters  */
-    string key = getPortFlexCounterTableKey(sai_serialize_object_id(pOID));
-    m_flexCounterTable->del(key);
-    /* Remove the associated port serdes attribute */
-    removePortSerdesAttribute(p.m_port_id);
-
-    m_portList[alias].m_init = false;
-
-    SWSS_LOG_NOTICE("De-Initialized port %s, OID:0x%" PRIx64 ".", pAlias.c_str(), pOID);
-}
-
-void PortsOrch::deInitPort(string alias, sai_object_id_t port_id)
-{
-    SWSS_LOG_ENTER();
-
-    Port p(alias, Port::PHY);
-    p.m_port_id = port_id;
-
     /* remove port from flex_counter_table for updating counters  */
     port_stat_manager.clearCounterIdList(p.m_port_id);
 
@@ -2092,9 +2070,9 @@ void PortsOrch::deInitPort(string alias, sai_object_id_t port_id)
     removePortSerdesAttribute(p.m_port_id);
 
     m_portList[alias].m_init = false;
-    SWSS_LOG_NOTICE("De-Initialized port %s", alias.c_str());
-}
 
+    SWSS_LOG_NOTICE("De-Initialized port %s, OID:0x%" PRIx64 ".", alias.c_str(), port_id);
+}
 
 bool PortsOrch::bake()
 {
@@ -4358,10 +4336,9 @@ void PortsOrch::destroyQueueMapPerPort(Port& port)
         m_queueIndexTable->hdel("", qOID);
         m_queueTypeTable->hdel("", qOID);
 
-        std::string key = getQueueFlexCounterTableKey(qOID);
-        m_flexCounterTable->del(key);
+        queue_stat_manager.clearCounterIdList(port.m_queue_ids[qIndex]);
 
-        key = getQueueWatermarkFlexCounterTableKey(qOID);
+        std::string key = getQueueWatermarkFlexCounterTableKey(qOID);
         m_flexCounterTable->del(key);
     }
     CounterCheckOrch::getInstance().removePort(port);

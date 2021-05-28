@@ -95,7 +95,7 @@ public:
     bool getVlanByVlanId(sai_vlan_id_t vlan_id, Port &vlan);
 
     bool setHostIntfsOperStatus(const Port& port, bool up) const;
-    void updateDbPortOperStatus(const Port& port, sai_port_oper_status_t status) const;
+    void updateDbPortStatus(const Port& port, sai_port_oper_status_t status) const;
 
     bool createBindAclTableGroup(sai_object_id_t  port_oid,
                    sai_object_id_t  acl_table_oid,
