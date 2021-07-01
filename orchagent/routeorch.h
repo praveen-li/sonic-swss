@@ -125,7 +125,6 @@ private:
     SwitchOrch *m_switchOrch;
     NeighOrch *m_neighOrch;
     IntfsOrch *m_intfsOrch;
-    FdbOrch *m_fdbOrch;
     VRFOrch *m_vrfOrch;
     FgNhgOrch *m_fgNhgOrch;
 

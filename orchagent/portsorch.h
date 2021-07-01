@@ -245,8 +245,7 @@ private:
     bool addPort(const set<int> &lane_set, uint32_t speed, int an=0, string fec="");
     sai_status_t removePort(sai_object_id_t port_id);
     bool initPort(const string &alias, const int index, const set<int> &lane_set);
-    void deInitPort(Port&);
-    void flush();
+    void deInitPort(string alias, sai_object_id_t port_id);
 
     bool setPortAdminStatus(Port &port, bool up);
     bool getPortAdminStatus(sai_object_id_t id, bool& up);
@@ -295,8 +294,6 @@ private:
 
     bool getSaiAclBindPointType(Port::Type                type,
                                 sai_acl_bind_point_type_t &sai_acl_bind_type);
-
-    void flushFDBEntries(Port& port);
     void initGearbox();
     bool initGearboxPort(Port &port);
     

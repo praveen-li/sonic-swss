@@ -1924,33 +1924,13 @@ sai_status_t PortsOrch::removePort(sai_object_id_t port_id)
     sai_status_t status = sai_port_api->remove_port(port_id);
     if (status != SAI_STATUS_SUCCESS)
     {
-        if (status != SAI_STATUS_OBJECT_IN_USE)
-        {
-            SWSS_LOG_ERROR("Failed to remove port %" PRIx64 ", rv:%d", port_id, status);
-            throw runtime_error("Delete port failed");
-        }
         return status;
     }
 
-    flush();
     m_portCount--;
     SWSS_LOG_NOTICE("Remove port %" PRIx64, port_id);
+
     return status;
-}
-
-/* Flush redis through sairedis interface */
-void PortsOrch::flush()
-{
-    SWSS_LOG_ENTER();
-
-    sai_attribute_t attr;
-    attr.id = SAI_REDIS_SWITCH_ATTR_FLUSH;
-    sai_status_t status = sai_switch_api->set_switch_attribute(gSwitchId, &attr);
-    if (status != SAI_STATUS_SUCCESS)
-    {
-        SWSS_LOG_ERROR("Failed to flush redis pipeline %d", status);
-        exit(EXIT_FAILURE);
-    }
 }
 
 string PortsOrch::getQueueWatermarkFlexCounterTableKey(string key)
@@ -2042,23 +2022,12 @@ bool PortsOrch::initPort(const string &alias, const int index, const set<int> &l
     return true;
 }
 
-void PortsOrch::deInitPort(Port& p)
+void PortsOrch::deInitPort(string alias, sai_object_id_t port_id)
 {
     SWSS_LOG_ENTER();
 
-    string alias = p.m_alias;
-    sai_object_id_t port_id = p.m_port_id;
-
-    // Destroy port's queue and PG flex stat counters
-    if (p.m_isPortQueueMapGenerated)
-    {
-        destroyQueueMapPerPort(p);
-    }
-
-    if (p.m_isPortPriorityGroupMapGenerated)
-    {
-        destroyPriorityGroupMapPerPort(p);
-    }
+    Port p(alias, Port::PHY);
+    p.m_port_id = port_id;
 
     /* remove port from flex_counter_table for updating counters  */
     port_stat_manager.clearCounterIdList(p.m_port_id);
@@ -2070,9 +2039,9 @@ void PortsOrch::deInitPort(Port& p)
     removePortSerdesAttribute(p.m_port_id);
 
     m_portList[alias].m_init = false;
-
-    SWSS_LOG_NOTICE("De-Initialized port %s, OID:0x%" PRIx64 ".", alias.c_str(), port_id);
+    SWSS_LOG_NOTICE("De-Initialized port %s", alias.c_str());
 }
+
 
 bool PortsOrch::bake()
 {
@@ -2734,7 +2703,7 @@ void PortsOrch::doPortTask(Consumer &consumer)
 
             if (m_portList[alias].m_init)
             {
-                deInitPort(m_portList[alias]);
+                deInitPort(alias, port_id);
                 SWSS_LOG_NOTICE("Removing hostif %" PRIx64 " for Port %s", hif_id, alias.c_str());
                 sai_status_t status = sai_hostif_api->remove_hostif(hif_id);
                 if (status != SAI_STATUS_SUCCESS)
@@ -3029,17 +2998,6 @@ void PortsOrch::doLagTask(Consumer &consumer)
                 }
                 else if (fvField(i) == "oper_status")
                 {
-                     if (fvValue(i) == "down")
-                     {
-                        Port lag;
-                        lag.m_oper_status = SAI_PORT_OPER_STATUS_DOWN;
-                        if (getPort(alias, lag))
-                        {
-                            SWSS_LOG_NOTICE("Flushing FDB entries for %s with bridge port id: %" PRIx64
-                                " as it is DOWN", alias.c_str(), lag.m_bridge_port_id);
-                            flushFDBEntries(lag);
-                        }
-                    }
                     operation_status = fvValue(i);
                     if (!string_oper_status.count(operation_status))
                     {
@@ -3430,37 +3388,6 @@ bool PortsOrch::initializePort(Port &port)
     initializePriorityGroups(port);
     initializeQueues(port);
     initializePortMaximumHeadroom(port);
-
-    if (m_isQueueMapGenerated && !port.m_isPortQueueMapGenerated)
-    {
-        //------------------------------------------------------------
-        // m_isQueueMapGenerated | m_isPortQueueMapGenerated | Action |
-        //------------------------------------------------------------
-        //     FALSE             |         FALSE             |  A1    |
-        //------------------------------------------------------------
-        //     FALSE             |         TRUE              |  A2    |
-        //------------------------------------------------------------
-        //     TRUE              |         FALSE             |  A3    |
-        //------------------------------------------------------------
-        //     TRUE              |         TRUE              |  A4    |
-        //------------------------------------------------------------
-        // A1 -> No flex group is configured, flexCounterOrch did NOT request to generate
-        //       QueueMap for any port, so lets NOT do it.
-        // A2 -> This should never happen
-        // A3 -> flexCounterOrch has already requested to genreate QueueMap for all ports.
-        //       We deleted the port as part of dynamic port breakout and re-creating it.
-        //       Lets generate it now.
-        // A4 -> flexCounterOrch has already requested to genreate QueueMap for all ports.
-        //        And we have done so.
-        generateQueueMapPerPort(port);
-    }
-
-    if (m_isPriorityGroupMapGenerated &&
-        !port.m_isPortPriorityGroupMapGenerated)
-    {
-        // Similar comment as that for queueMap above.
-        generatePriorityGroupMapPerPort(port);
-    }
 
     /* Create host interface */
     if (!addHostIntfs(port, port.m_alias, port.m_hif_id))
@@ -4250,7 +4177,7 @@ void PortsOrch::generateQueueMap()
         return;
     }
 
-    for (auto& it: m_portList)
+    for (const auto& it: m_portList)
     {
         if (it.second.m_type == Port::PHY)
         {
@@ -4261,7 +4188,7 @@ void PortsOrch::generateQueueMap()
     m_isQueueMapGenerated = true;
 }
 
-void PortsOrch::generateQueueMapPerPort(Port& port)
+void PortsOrch::generateQueueMapPerPort(const Port& port)
 {
     /* Create the Queue map in the Counter DB */
     /* Add stat counters to flex_counter */
@@ -4319,30 +4246,6 @@ void PortsOrch::generateQueueMapPerPort(Port& port)
     m_queueTypeTable->set("", queueTypeVector);
 
     CounterCheckOrch::getInstance().addPort(port);
-    port.m_isPortQueueMapGenerated = true;
-}
-
-void PortsOrch::destroyQueueMapPerPort(Port& port)
-{
-    for (size_t qIndex = 0; qIndex < port.m_queue_ids.size(); ++qIndex)
-    {
-        std::ostringstream qName;
-        qName << port.m_alias << ":" << qIndex;
-
-        const auto qOID = sai_serialize_object_id(port.m_queue_ids[qIndex]);
-
-        m_queueTable->hdel("", qName.str());
-        m_queuePortTable->hdel("", qOID);
-        m_queueIndexTable->hdel("", qOID);
-        m_queueTypeTable->hdel("", qOID);
-
-        queue_stat_manager.clearCounterIdList(port.m_queue_ids[qIndex]);
-
-        std::string key = getQueueWatermarkFlexCounterTableKey(qOID);
-        m_flexCounterTable->del(key);
-    }
-    CounterCheckOrch::getInstance().removePort(port);
-    port.m_isPortQueueMapGenerated = false;
 }
 
 void PortsOrch::generatePriorityGroupMap()
@@ -4352,7 +4255,7 @@ void PortsOrch::generatePriorityGroupMap()
         return;
     }
 
-    for (auto& it: m_portList)
+    for (const auto& it: m_portList)
     {
         if (it.second.m_type == Port::PHY)
         {
@@ -4363,7 +4266,7 @@ void PortsOrch::generatePriorityGroupMap()
     m_isPriorityGroupMapGenerated = true;
 }
 
-void PortsOrch::generatePriorityGroupMapPerPort(Port& port)
+void PortsOrch::generatePriorityGroupMapPerPort(const Port& port)
 {
     /* Create the PG map in the Counter DB */
     /* Add stat counters to flex_counter */
@@ -4419,26 +4322,6 @@ void PortsOrch::generatePriorityGroupMapPerPort(Port& port)
     m_pgIndexTable->set("", pgIndexVector);
 
     CounterCheckOrch::getInstance().addPort(port);
-    port.m_isPortPriorityGroupMapGenerated = true;
-}
-
-void PortsOrch::destroyPriorityGroupMapPerPort(Port& port)
-{
-    for (size_t pgIndex = 0; pgIndex < port.m_priority_group_ids.size(); ++pgIndex)
-    {
-        std::ostringstream pgName;
-        pgName << port.m_alias << ":" << pgIndex;
-
-        const auto pgOID = sai_serialize_object_id(port.m_priority_group_ids[pgIndex]);
-        m_pgTable->hdel("", pgName.str());
-        m_pgPortTable->hdel("", pgOID);
-        m_pgIndexTable->hdel("", pgOID);
-
-        string key = getPriorityGroupWatermarkFlexCounterTableKey(pgOID);
-        m_flexCounterTable->del(key);
-    }
-    CounterCheckOrch::getInstance().removePort(port);
-    port.m_isPortPriorityGroupMapGenerated = false;
 }
 
 void PortsOrch::doTask(NotificationConsumer &consumer)
@@ -4486,13 +4369,6 @@ void PortsOrch::doTask(NotificationConsumer &consumer)
 
             updatePortOperStatus(port, status);
 
-            if (status == SAI_PORT_OPER_STATUS_DOWN)
-            {
-                SWSS_LOG_NOTICE("Flushing FDB entries for %s with bridge port id: %" PRIx64
-                    " as it is DOWN", port.m_alias.c_str(), port.m_bridge_port_id);
-                flushFDBEntries(port);
-            }
-
             /* update m_portList */
             m_portList[port.m_alias] = port;
         }
@@ -4513,7 +4389,7 @@ void PortsOrch::updatePortOperStatus(Port &port, sai_port_oper_status_t status)
 
     if (port.m_type == Port::PHY)
     {
-        updateDbPortStatus(port, status);
+        updateDbPortOperStatus(port, status);
     }
     port.m_oper_status = status;
 
@@ -4762,48 +4638,6 @@ void PortsOrch::getPortSerdesVal(const std::string& val_str,
     {
         lane_val = (uint32_t)std::stoul(lane_str, NULL, 16);
         lane_values.push_back(lane_val);
-    }
-}
-
-void PortsOrch::flushFDBEntries(Port &port)
-{
-    sai_object_id_t bridge_port_id = port.m_bridge_port_id;
-    sai_attribute_t attr;
-    vector<sai_attribute_t> attrs;
-    sai_status_t rv;
-
-    // If bridge port ID and bvid both are are NOT specified,
-    // SAI REDIS will flush all FDB entries. This function is meant
-    // to delete passed in bridge_port_id's FDB entries only.
-    // Hence bridge_port_id cannot be SAI_NULL_OBJECT_ID.
-    if (SAI_NULL_OBJECT_ID == bridge_port_id)
-    {
-        SWSS_LOG_WARN("NOT flushing FDB entries as bridge port ID:0x0");
-        return;
-    }
-
-    SWSS_LOG_INFO("Flushing FDB entry with bridge port id: %" PRIx64, bridge_port_id);
-    attr.id = SAI_FDB_FLUSH_ATTR_BRIDGE_PORT_ID;
-    attr.value.oid = bridge_port_id;
-    attrs.push_back(attr);
-    rv = sai_fdb_api->flush_fdb_entries(gSwitchId, (uint32_t)attrs.size(), attrs.data());
-
-    if (rv != SAI_STATUS_SUCCESS)
-    {
-        SWSS_LOG_ERROR("Flush fdb by bridge port id: %" PRIx64 " failed: %d", bridge_port_id, rv);
-    }
-
-    // Find every VLAN that contains this port as member
-    // and notify observers to flush ARP entries
-    for (const auto& vlan : m_portList)
-    {
-        if ((vlan.second.m_type == Port::VLAN) &&
-            (vlan.second.m_members.find(port.m_alias) !=
-             vlan.second.m_members.end()))
-        {
-            sai_object_id_t bvid = vlan.second.m_vlan_info.vlan_oid;
-            gFdbOrch->notifyObserversFDBFlush(port, bvid);
-        }
     }
 }
 
